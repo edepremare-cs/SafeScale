@@ -36,7 +36,7 @@ GRON := github.com/tomnomnom/gron
 JSONTOML := github.com/pelletier/go-toml
 
 # Default build tags
-BUILD_TAGS = 
+BUILD_TAGS = alltests
 export BUILD_TAGS
 
 all: logclean ground getdevdeps mod sdk generate lib mintest cli minimock err vet
