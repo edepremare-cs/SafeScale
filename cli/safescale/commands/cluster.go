@@ -17,7 +17,10 @@
 package commands
 
 import (
+	"archive/zip"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1788,7 +1791,7 @@ var clusterAnsibleInventoryCommands = &cli.Command{
 		settings := protocol.FeatureSettings{}
 		if err := clientSession.Cluster.CheckFeature(clusterName, "ansible", values, &settings, 0); err != nil { // FIXME: define duration
 			err = fail.FromGRPCStatus(err)
-			msg := fmt.Sprintf("error checking Feature \"ansible\" on Cluster '%s': %s", featureName, clusterName, err.Error())
+			msg := fmt.Sprintf("error checking Feature \"ansible\" on Cluster '%s': %s", clusterName, err.Error())
 			return clitools.FailureResponse(clitools.ExitOnRPC(msg))
 		}
 
@@ -1797,7 +1800,7 @@ var clusterAnsibleInventoryCommands = &cli.Command{
 		var captureInventory = false
 		// FIXME: Must set absolute inventory path, use "sudo -i" (interactive) with debian change $PATH, and makes fail ansible path finder (dirty way)
 		// event not ~.ansible.cfg or ANSIBLE_CONFIG defined for user cladm (could be a solution ?)
-		var inventoryPath string = utils.BaseFolder + "/etc/ansible/inventory/inventory.py"
+		var inventoryPath string = fmt.Sprintf("%s/ansible/inventory/inventory.py", utils.EtcFolder)
 		var filteredArgs []string
 		for _, arg := range args {
 			if captureInventory {
@@ -1878,7 +1881,7 @@ var clusterAnsibleRunCommands = &cli.Command{
 		settings := protocol.FeatureSettings{}
 		if err := clientSession.Cluster.CheckFeature(clusterName, "ansible", values, &settings, 0); err != nil { // FIXME: define duration
 			err = fail.FromGRPCStatus(err)
-			msg := fmt.Sprintf("error checking Feature \"ansible\" on Cluster '%s': %s", featureName, clusterName, err.Error())
+			msg := fmt.Sprintf("error checking Feature \"ansible\" on Cluster '%s': %s", clusterName, err.Error())
 			return clitools.FailureResponse(clitools.ExitOnRPC(msg))
 		}
 
@@ -1887,7 +1890,7 @@ var clusterAnsibleRunCommands = &cli.Command{
 		var captureInventory = false
 		// FIXME: Must set absolute inventory path, use "sudo -i" (interactive) with debian change $PATH, and makes fail ansible path finder (dirty way)
 		// event not ~.ansible.cfg or ANSIBLE_CONFIG defined for user cladm (could be a solution ?)
-		var inventoryPath string = utils.BaseFolder + "/etc/ansible/inventory/inventory.py"
+		var inventoryPath string = fmt.Sprintf("%s/ansible/inventory/inventory.py", utils.EtcFolder)
 		var filteredArgs []string
 		for _, arg := range args {
 			if captureInventory {
@@ -1947,6 +1950,39 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 	ArgsUsage: "CLUSTERNAME",
 
 	Action: func(c *cli.Context) error {
+
+		/*
+			Ansible tree strcut required by ansible
+
+			group_vars/ (f)
+			hosts_vars/ (f)
+			vars/ (f)
+			library/ (f)
+			module_utils/ (f)
+			filter_plugins/ (f)
+			tasks/ (f)
+			roles/ (f)
+			playbook.yml
+			readme.md (f)
+
+			Extension allows:
+			.yml
+			.md
+			.j2 (role/[xxx]/templates)
+			any (role/[xxx]/files)
+
+		*/
+		var treeStruct []string = []string{
+			"group_vars",
+			"hosts_vars",
+			"vars",
+			"library",
+			"module_utils",
+			"filter_plugins",
+			"tasks",
+			"roles",
+		}
+
 		logrus.Tracef("SafeScale command: %s %s with args '%s'", clusterCmdLabel, c.Command.Name, c.Args())
 		err := extractClusterName(c)
 		if err != nil {
@@ -1964,7 +2000,7 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 		settings := protocol.FeatureSettings{}
 		if err := clientSession.Cluster.CheckFeature(clusterName, "ansible", values, &settings, 0); err != nil { // FIXME: define duration
 			err = fail.FromGRPCStatus(err)
-			msg := fmt.Sprintf("error checking Feature \"ansible\" on Cluster '%s': %s", featureName, clusterName, err.Error())
+			msg := fmt.Sprintf("error checking Feature \"ansible\" on Cluster '%s': %s", clusterName, err.Error())
 			return clitools.FailureResponse(clitools.ExitOnRPC(msg))
 		}
 
@@ -1975,7 +2011,8 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 		// FIXME: Must set absolute inventory path, use "sudo -i" (interactive) with debian change $PATH, and makes fail ansible path finder (dirty way)
 		// event not ~.ansible.cfg or ANSIBLE_CONFIG defined for user cladm (could be a solution ?)
 		// find no configuration for playbook defaut directory, must be absolute (arg: local file, mapped to remote)
-		var inventoryPath string = utils.BaseFolder + "/etc/ansible/inventory/inventory.py"
+		var ansibleDir string = fmt.Sprintf("%s/ansible/", utils.EtcFolder)
+		var inventoryPath string = fmt.Sprintf("%sinventory/inventory.py", ansibleDir)
 		var playbookFile string = ""
 		var filteredArgs []string
 		var isParam bool
@@ -2016,7 +2053,7 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 				[--ssh-extra-args SSH_EXTRA_ARGS] [-C] [--syntax-check] [-D]
 				[-e EXTRA_VARS] [--vault-id VAULT_IDS]
 				[--ask-vault-pass | --vault-password-file VAULT_PASSWORD_FILES]
-				[-f FORKS] [-M MODULE_PATH] [--playbook-dir BASEDIR]
+				[-f FORKS] [-M MODULE_PATH]
 				[-a MODULE_ARGS] [-m MODULE_NAME]
 				*/
 				filteredArgs = append(filteredArgs, arg)
@@ -2035,27 +2072,223 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 		}
 
 		// Check local file exists
-		if _, err := os.Stat(playbookFile); os.IsNotExist(err) {
+		stat, err := os.Stat(playbookFile)
+		if os.IsNotExist(err) {
 			msg := fmt.Sprintf("Playbook file not found for cluster '%s'", clusterName)
 			return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
 		}
-
-		// Prepare remote playbook
-		var playbookBasename string = playbookFile
-		pos := strings.LastIndex(playbookFile, "/")
-		if pos >= 0 {
-			playbookBasename = playbookFile[pos+1 : len(playbookFile)]
+		if !stat.Mode().IsRegular() {
+			msg := fmt.Sprintf("Playbook is not regular file, for cluster '%s'", clusterName)
+			return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
 		}
+
+		// Check extension
+		var playbookExtension string = ""
+		pos := strings.LastIndex(playbookFile, ".")
+		if pos >= 0 {
+			playbookExtension = strings.ToLower(playbookFile[pos+1:])
+		}
+
+		// Temporary working directory
+		tmpDirectory := "/tmp/safescale-ansible-playbook/"
+		_ = os.RemoveAll(tmpDirectory)
+		_ = os.Mkdir(tmpDirectory, 0755)
+
+		var list []string = []string{}
+		switch playbookExtension {
+		case "yml":
+
+			// Copy to tmp workdir
+			err = func(playbookFile string, tmpDirectory string) (err error) {
+				source, err := os.Open(playbookFile)
+				if err != nil {
+					return err
+				}
+				defer source.Close()
+				destination, err := os.Create(fmt.Sprintf("%s/playbook.yml", tmpDirectory))
+				if err != nil {
+					return err
+				}
+				defer destination.Close()
+				_, err = io.Copy(destination, source)
+				if err != nil {
+					return err
+				}
+				return nil
+
+			}(playbookFile, tmpDirectory)
+
+			if err != nil {
+				msg := fmt.Sprintf("Playbook copy to working directory fail for cluster '%s': %s", clusterName, err)
+				return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+			}
+
+			list = []string{"playbook.yml"}
+
+			break
+		case "zip":
+			// Check archive content
+			err, list = func(archivePath string, tmpDirectory string) (err error, list []string) {
+				archive, err := zip.OpenReader(playbookFile)
+				if err != nil {
+					return err, nil
+				}
+				defer archive.Close()
+
+				list = []string{}
+
+				var foundPlaybook bool = false
+				for _, f := range archive.File {
+					if !f.FileInfo().IsDir() {
+
+						// Chech if file path is allow in ansible tree struct (ignore empty directories)
+						err := func(path string, allowDirs []string) error {
+							pos := strings.Index(path, "/")
+							if pos >= 0 {
+								fileBaseDir := path[:pos]
+								found := false
+								for _, v := range allowDirs {
+									if v == fileBaseDir {
+										found = true
+										break
+									}
+								}
+								if !found {
+									return errors.New(fmt.Sprintf("file path '%s' not allow in ansible tree struct", path))
+								}
+							}
+							return nil
+						}(f.Name, treeStruct)
+						if err != nil {
+							return err, nil
+						}
+
+						// Playbook
+						if f.Name == "playbook.yml" {
+							foundPlaybook = true
+						}
+
+						// Unzip contain to temporary location
+						path := fmt.Sprintf("%s%s", tmpDirectory, f.Name)
+						err = os.MkdirAll(filepath.Dir(path), os.ModePerm)
+
+						if err != nil {
+							return err, nil
+						}
+						dstFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+						defer dstFile.Close()
+						if err != nil {
+							return err, nil
+						}
+						fileInArchive, err := f.Open()
+						defer fileInArchive.Close()
+						if err != nil {
+							return err, nil
+						}
+						_, err = io.Copy(dstFile, fileInArchive)
+						if err != nil {
+							return err, nil
+						}
+
+						// Add filepath to valid files in archives
+						list = append(list, f.Name)
+
+					}
+				}
+				if !foundPlaybook {
+					return errors.New("archive has no playbook file \"playbook.yml\" on it's root"), nil
+				}
+
+				return nil, list
+			}(playbookFile, tmpDirectory)
+			if err != nil {
+				msg := fmt.Sprintf("Playbook archive invalid '%s': %s", clusterName, err)
+				return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+			}
+			break
+		default:
+			msg := fmt.Sprintf("Playbook file extention expect .yml or .zip, (unexpected %s) for cluster '%s'", playbookExtension, clusterName)
+			return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+		}
+
+		// Make cleaned archive
+		err = func(tmpDirectory string, list []string, playBookArchivePath string) (err error) {
+
+			archive, err := os.Create(playBookArchivePath)
+			if err != nil {
+				msg := fmt.Sprintf("Fail to create cleaned playbook archive for cluster '%s': %s", clusterName, err)
+				return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+			}
+			defer archive.Close()
+
+			zipWriter := zip.NewWriter(archive)
+			defer zipWriter.Close()
+
+			for _, path := range list {
+				fpFrom, err := os.Open(fmt.Sprintf("%s%s", tmpDirectory, path))
+				if err != nil {
+					return err
+				}
+				defer fpFrom.Close()
+				fpTo, err := zipWriter.Create(path)
+				if err != nil {
+					return err
+				}
+				if _, err := io.Copy(fpTo, fpFrom); err != nil {
+					return err
+				}
+			}
+			return nil
+
+		}(tmpDirectory, list, fmt.Sprintf("%splaybook.zip", tmpDirectory))
+
+		if err != nil {
+			msg := fmt.Sprintf("Fail to make cleaned playbook archive for cluster '%s': %s", clusterName, err)
+			return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+		}
+
+		// Upload playbook archive
 		valuesOnRemote := &client.RemoteFilesHandler{}
 		rfc := client.RemoteFileItem{
-			Local:  playbookFile,
-			Remote: fmt.Sprintf("%s/ansible_playbook.%s", utils.TempFolder, playbookBasename),
+			Local:  fmt.Sprintf("%splaybook.zip", tmpDirectory),
+			Remote: fmt.Sprintf("%s/ansible_playbook.zip", utils.TempFolder),
 		}
 		valuesOnRemote.Add(&rfc)
 
+		// Unzip archive to final destination and run playbook
+		cmdStr := fmt.Sprintf(
+			"sudo chown cladm:root %s && sudo chmod 0774 %s && sudo -u cladm unzip -o %s -d %s && ([ -f %srequirements.yml ] && sudo -u cladm -i ansible-galaxy install -r %srequirements.yml || true) && sudo -u cladm -i ansible-playbook %splaybook.yml -i %s %s",
+			rfc.Remote,
+			rfc.Remote,
+			rfc.Remote,
+			ansibleDir,
+			ansibleDir,
+			ansibleDir,
+			ansibleDir,
+			inventoryPath,
+			strings.Join(filteredArgs, " "),
+		)
+
 		// Run playbook
-		cmdStr := `sudo chown cladm:root ` + rfc.Remote + ` && sudo chmod 0774 ` + rfc.Remote + ` && sudo -u cladm -i ansible-playbook ` + rfc.Remote + ` -i ` + inventoryPath + ` ` + strings.Join(filteredArgs, " ") // + useTLS
-		return executeCommand(clientSession, cmdStr, valuesOnRemote, outputs.DISPLAY)
+		err = executeCommand(clientSession, cmdStr, valuesOnRemote, outputs.DISPLAY)
+
+		// Even if command fail, must delete remote files as possible
+		cmdStr = ""
+		for _, v := range treeStruct {
+			cmdStr = fmt.Sprintf("%s sudo -u cladm rm -rf %s%s/* &&", cmdStr, ansibleDir, v)
+		}
+		cmdStr = fmt.Sprintf("%s sudo -u cladm rm -f %splaybook.yml", cmdStr, ansibleDir)
+
+		_ = executeCommand(clientSession, cmdStr, valuesOnRemote, outputs.DISPLAY)
+
+		// Clean temporaries (local)
+		_ = os.RemoveAll(tmpDirectory)
+
+		if err != nil {
+			msg := fmt.Sprintf("Fail to run playbook for cluster '%s': %s", clusterName, err)
+			return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+		}
+		return nil
 
 	},
 }
