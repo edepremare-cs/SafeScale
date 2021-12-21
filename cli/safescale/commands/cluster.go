@@ -2063,7 +2063,7 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 				"                                                playbook.yml\n" +
 				"\n" +
 				"optional arguments:\n" +
-				"--ask-vault-pass                                ask for vault password\n" + // no prompt mapped */
+				"--ask-vault-pass                                ask for vault password\n" +
 				"--flush-cache                                   clear the fact cache for every host in inventory\n" +
 				"--force-handlers                                run handlers even if a task fails\n" +
 				"--list-hosts                                    outputs a list of matching hosts; does not execute anything else\n" +
@@ -2428,10 +2428,10 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 
 		// Even if command fail, must delete remote files as possible
 		cmdStr = ""
-		for _, v := range treeStruct {
-			cmdStr = fmt.Sprintf("%s sudo -u cladm rm -rf %s%s/* &&", cmdStr, ansibleDir, v)
+		for _, v := range list {
+			cmdStr = fmt.Sprintf("%s sudo -u cladm rm -f %s%s &&", cmdStr, ansibleDir, v)
 		}
-		cmdStr = fmt.Sprintf("%s sudo -u cladm rm -f %splaybook.yml", cmdStr, ansibleDir)
+		cmdStr = fmt.Sprintf("%s sudo -u cladm rm -f %splaybook.zip", cmdStr, tmpDirectory)
 
 		_ = executeCommand(clientSession, cmdStr, valuesOnRemote, outputs.DISPLAY)
 
