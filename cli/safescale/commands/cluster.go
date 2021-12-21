@@ -18,6 +18,7 @@ package commands
 
 import (
 	"archive/zip"
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -1951,27 +1952,167 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 
 	Action: func(c *cli.Context) error {
 
-		/*
-			Ansible tree strcut required by ansible
+		// Format arguments
+		args := c.Args().Tail()
+		var captureInventory bool = false
+		var capturePlaybookFile bool = true
+		var captureVaultFile bool = false
+		var askForHelp bool = false
+		var askForVault bool = false
+		// FIXME: Must set absolute inventory path, use "sudo -i" (interactive) with debian change $PATH, and makes fail ansible path finder (dirty way)
+		// event not ~.ansible.cfg or ANSIBLE_CONFIG defined for user cladm (could be a solution ?)
+		// find no configuration for playbook defaut directory, must be absolute (arg: local file, mapped to remote)
+		var ansibleDir string = fmt.Sprintf("%s/ansible/", utils.EtcFolder)
+		var inventoryPath string = fmt.Sprintf("%sinventory/inventory.py", ansibleDir)
+		var playbookFile string = ""
+		var vaultFile string = ""
+		var filteredArgs []string
+		var isParam bool
+		for _, arg := range args {
+			isParam = (string([]rune(arg))[0] == '-')
+			if isParam {
+				capturePlaybookFile = false
+			}
+			if captureInventory {
+				inventoryPath = arg
+				captureInventory = false
+				continue
+			}
+			if capturePlaybookFile {
+				playbookFile = arg
+				capturePlaybookFile = false
+				continue
+			}
+			if captureVaultFile {
+				vaultFile = arg
+				captureVaultFile = false
+				continue
+			}
+			switch arg {
+			case "-i":
+			case "--inventory":
+			case "--inventory-file": // Deprecated
+				/* Expect here
+				[-i INVENTORY]
+				*/
+				captureInventory = true // extract given inventory (overload default inventoryPath)
+				break
+			case "--vault-password-file":
+				captureVaultFile = true
+				break
+			case "--ask-vault-pass":
+				askForVault = true
+				break
+			case "-h":
+			case "--help":
+				askForHelp = true
+			default:
+				/* Expect here
+				[-h] [--version] [-v] [-b] [--become-method BECOME_METHOD] [--become-user USER]
+				[-K] [--list-hosts]
+				[-l SUBSET] [-P POLL_INTERVAL] [-B SECONDS] [-o] [-t TREE] [-k]
+				[--private-key PRIVATE_KEY_FILE] [-u REMOTE_USER]
+				[-c CONNECTION] [-T TIMEOUT]
+				[--ssh-common-args SSH_COMMON_ARGS]
+				[--sftp-extra-args SFTP_EXTRA_ARGS]
+				[--scp-extra-args SCP_EXTRA_ARGS]
+				[--ssh-extra-args SSH_EXTRA_ARGS] [-C] [--syntax-check] [-D]
+				[-e EXTRA_VARS] [--vault-id VAULT_IDS]
+				[--ask-vault-pass | --vault-password-file VAULT_PASSWORD_FILES]
+				[-f FORKS] [-M MODULE_PATH]
+				[-a MODULE_ARGS] [-m MODULE_NAME]
+				*/
+				filteredArgs = append(filteredArgs, arg)
+				break
+			}
 
-			group_vars/ (f)
-			hosts_vars/ (f)
-			vars/ (f)
-			library/ (f)
-			module_utils/ (f)
-			filter_plugins/ (f)
-			tasks/ (f)
-			roles/ (f)
-			playbook.yml
-			readme.md (f)
+			if !isParam && capturePlaybookFile == false {
+				capturePlaybookFile = true
+			}
+		}
 
-			Extension allows:
-			.yml
-			.md
-			.j2 (role/[xxx]/templates)
-			any (role/[xxx]/files)
+		// Ask for help
+		if askForHelp {
+			fmt.Print("" +
+				"usage: safescale cluster ansible playbook CLUSTERNAME\n" +
+				"    [-h, --help] [ -v, --version] [-k] [--private-key PRIVATE_KEY_FILE] [-u REMOTE_USER]\n" +
+				"    [-c CONNECTION] [-T TIMEOUT] [--ssh-common-args SSH_COMMON_ARGS]\n" +
+				"    [--sftp-extra-args SFTP_EXTRA_ARGS] [--scp-extra-args SCP_EXTRA_ARGS]\n" +
+				"    [--ssh-extra-args SSH_EXTRA_ARGS] [--force-handlers] [--flush-cache] [-b]\n" +
+				"    [--become-method BECOME_METHOD] [--become-user BECOME_USER] [-K] [-t TAGS]\n" +
+				"    [--skip-tags SKIP_TAGS] [-C] [--syntax-check] [-D] [-i INVENTORY] [--list-hosts]\n" +
+				"    [-l SUBSET] [-e EXTRA_VARS] [--vault-id VAULT_IDS]\n" +
+				"    [--ask-vault-pass | --vault-password-file VAULT_PASSWORD_FILES] [-f FORKS] [-M MODULE_PATH]\n" +
+				"    [--list-tasks] [--list-tags] [--step] [--start-at-task START_AT_TASK]\n" +
+				"    playbook [playbook ...]\n" +
+				"\n" +
+				"Runs Ansible playbooks, executing the defined tasks on the targeted hosts.\n" +
+				"\n" +
+				"positional arguments:\n" +
+				"playbook                                        Playbook(s). Accept .yml file, or .zip archive with playbook.yml file and dependencies with following tree struct :\n" +
+				"                                                group_vars/        (facultative)\n" +
+				"                                                hosts_vars/        (facultative)\n" +
+				"                                                vars/              (facultative)\n" +
+				"                                                library/           (facultative)\n" +
+				"                                                module_utils/      (facultative)\n" +
+				"                                                filter_plugins/    (facultative)\n" +
+				"                                                tasks/             (facultative)\n" +
+				"                                                roles/             (facultative)\n" +
+				"                                                requirements.yml   (facultative) used for declare dependencies, trigger ansible-galaxy imports\n" +
+				"                                                .vault             (facultative) vault file exchange \n" +
+				"                                                playbook.yml\n" +
+				"\n" +
+				"optional arguments:\n" +
+				"--ask-vault-pass                                ask for vault password\n" + // no prompt mapped */
+				"--flush-cache                                   clear the fact cache for every host in inventory\n" +
+				"--force-handlers                                run handlers even if a task fails\n" +
+				"--list-hosts                                    outputs a list of matching hosts; does not execute anything else\n" +
+				"--list-tags                                     list all available tags\n" +
+				"--list-tasks                                    list all tasks that would be executed\n" +
+				"--skip-tags SKIP_TAGS                           only run plays and tasks whose tags do not match these values\n" +
+				"--start-at-task START_AT_TASK                   start the playbook at the task matching this name\n" +
+				"--step                                          one-step-at-a-time: confirm each task before running\n" +
+				"--syntax-check                                  perform a syntax check on the playbook, but do not execute it\n" +
+				"--vault-id VAULT_IDS                            the vault identity to use\n" +
+				"--vault-password-file VAULT_PASSWORD_FILES      vault password file\n" +
+				"--version                                       show program's version number, config file location, configured module search path, module\n" +
+				"                                                location, executable location and exit\n" +
+				"-C, --check                                     don't make any changes; instead, try to predict some of the changes that may occur\n" +
+				"-D, --diff                                      when changing (small) files and templates, show the differences in those files; works great\n" +
+				"                                                with --check\n" +
+				"(-M | --module-path) MODULE_PATH                prepend colon-separated path(s) to module library\n" +
+				"                                                (default=~/.ansible/plugins/modules:/usr/share/ansible/plugins/modules)\n" +
+				"(-e | --extra-vars) EXTRA_VARS                  set additional variables as key=value or YAML/JSON, if filename prepend with @\n" +
+				"(-f | --forks) FORKS                            specify number of parallel processes to use (default=5)\n" +
+				"'-h | --help)                                   show this help message and exit\n" +
+				"(-i | --inventory ) INVENTORY	                 specify inventory host path or comma separated host list\n" +
+				"(-l | --limit) SUBSET                           further limit selected hosts to an additional pattern\n" +
+				"(-t | --tags)  TAGS                             only run plays and tasks tagged with these values\n" +
+				"(-v | --verbose )                               verbose mode (-vvv for more, -vvvv to enable connection debugging)\n" +
+				"\n" +
+				"Connection Options:\n" +
+				"control as whom and how to connect to hosts\n" +
+				"\n" +
+				"(--private-key | --key-file) PRIVATE_KEY_FILE   use this file to authenticate the connection\n" +
+				"--scp-extra-args SCP_EXTRA_ARGS                 specify extra arguments to pass to scp only (e.g. -l)\n" +
+				"--sftp-extra-args SFTP_EXTRA_ARGS               specify extra arguments to pass to sftp only (e.g. -f, -l)\n" +
+				"--ssh-common-args SSH_COMMON_ARGS               specify common arguments to pass to sftp/scp/ssh (e.g. ProxyCommand)\n" +
+				"--ssh-extra-args SSH_EXTRA_ARGS                 specify extra arguments to pass to ssh only (e.g. -R)\n" +
+				"(-T | --timeout ) TIMEOUT                       override the connection timeout in seconds (default=10)\n" +
+				"(-c | --connection ) CONNECTION                 connection type to use (default=smart)\n" +
+				"(-k | --ask-pass )                              ask for connection password\n" +
+				"(-u | --user ) REMOTE_USER                      connect as this user (default=None)\n" +
+				"\n" +
+				"Privilege Escalation Options:\n" +
+				"control how and which user you become as on target hosts\n" +
+				"\n" +
+				"--become-method BECOME_METHOD                   privilege escalation method to use (default=sudo), use `ansible-doc -t become -l` to list valid choices.\n" +
+				"--become-user BECOME_USER                       run operations as this user (default=root)\n" +
+				"(-K | --ask-become-pass)                        ask for privilege escalation password\n" +
+				"(-b | --become )                                run operations with become (does not imply password prompting)\n")
+			return nil
+		}
 
-		*/
 		var treeStruct []string = []string{
 			"group_vars",
 			"hosts_vars",
@@ -2002,67 +2143,6 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 			err = fail.FromGRPCStatus(err)
 			msg := fmt.Sprintf("error checking Feature \"ansible\" on Cluster '%s': %s", clusterName, err.Error())
 			return clitools.FailureResponse(clitools.ExitOnRPC(msg))
-		}
-
-		// Format arguments
-		args := c.Args().Tail()
-		var captureInventory = false
-		var capturePlaybookFile = true
-		// FIXME: Must set absolute inventory path, use "sudo -i" (interactive) with debian change $PATH, and makes fail ansible path finder (dirty way)
-		// event not ~.ansible.cfg or ANSIBLE_CONFIG defined for user cladm (could be a solution ?)
-		// find no configuration for playbook defaut directory, must be absolute (arg: local file, mapped to remote)
-		var ansibleDir string = fmt.Sprintf("%s/ansible/", utils.EtcFolder)
-		var inventoryPath string = fmt.Sprintf("%sinventory/inventory.py", ansibleDir)
-		var playbookFile string = ""
-		var filteredArgs []string
-		var isParam bool
-		for _, arg := range args {
-			isParam = (string([]rune(arg))[0] == '-')
-			if isParam {
-				capturePlaybookFile = false
-			}
-			if captureInventory {
-				inventoryPath = arg
-				captureInventory = false
-				continue
-			}
-			if capturePlaybookFile {
-				playbookFile = arg
-				capturePlaybookFile = false
-				continue
-			}
-			switch arg {
-			case "-i":
-			case "--inventory":
-			case "--inventory-file": // Deprecated
-				/* Expect here
-				[-i INVENTORY]
-				*/
-				captureInventory = true // extract given inventory (overload default inventoryPath)
-				break
-			default:
-				/* Expect here
-				[-h] [--version] [-v] [-b] [--become-method BECOME_METHOD] [--become-user USER]
-				[-K] [--list-hosts]
-				[-l SUBSET] [-P POLL_INTERVAL] [-B SECONDS] [-o] [-t TREE] [-k]
-				[--private-key PRIVATE_KEY_FILE] [-u REMOTE_USER]
-				[-c CONNECTION] [-T TIMEOUT]
-				[--ssh-common-args SSH_COMMON_ARGS]
-				[--sftp-extra-args SFTP_EXTRA_ARGS]
-				[--scp-extra-args SCP_EXTRA_ARGS]
-				[--ssh-extra-args SSH_EXTRA_ARGS] [-C] [--syntax-check] [-D]
-				[-e EXTRA_VARS] [--vault-id VAULT_IDS]
-				[--ask-vault-pass | --vault-password-file VAULT_PASSWORD_FILES]
-				[-f FORKS] [-M MODULE_PATH]
-				[-a MODULE_ARGS] [-m MODULE_NAME]
-				*/
-				filteredArgs = append(filteredArgs, arg)
-				break
-			}
-
-			if !isParam && capturePlaybookFile == false {
-				capturePlaybookFile = true
-			}
 		}
 
 		// Must set playbook file
@@ -2211,6 +2291,74 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 			return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
 		}
 
+		// Ask for vault password ? (map it to vault-file)
+		if askForVault {
+			err = func(tmpDirectory string) error {
+				fmt.Print("> Prompt vault password : ")
+				reader := bufio.NewReader(os.Stdin)
+				vaultPassword, err := reader.ReadString('\n')
+				if err != nil {
+					return err
+				}
+				vaultPassword = strings.TrimSpace(vaultPassword)
+				destination, err := os.Create(fmt.Sprintf("%s/.vault", tmpDirectory))
+				if err != nil {
+					return err
+				}
+				defer destination.Close()
+				_, err = destination.WriteString(vaultPassword)
+				if err != nil {
+					return err
+				}
+				return nil
+			}(tmpDirectory)
+
+			if err != nil {
+				msg := fmt.Sprintf("Fail to read vault password for cluster '%s'", clusterName)
+				return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+			} else {
+				list = append(list, ".vault")
+			}
+		} else {
+			// Check for vault file
+			if vaultFile != "" {
+				stat, err := os.Stat(vaultFile)
+				if os.IsNotExist(err) {
+					msg := fmt.Sprintf("Playbook vault file not found for cluster '%s'", clusterName)
+					return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+				}
+				if !stat.Mode().IsRegular() {
+					msg := fmt.Sprintf("Playbook vault file is not regular file, for cluster '%s'", clusterName)
+					return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+				}
+				// Copy to tmp workdir
+				err = func(vaultFile string, tmpDirectory string) (err error) {
+					source, err := os.Open(vaultFile)
+					if err != nil {
+						return err
+					}
+					defer source.Close()
+					destination, err := os.Create(fmt.Sprintf("%s/.vault", tmpDirectory))
+					if err != nil {
+						return err
+					}
+					defer destination.Close()
+					_, err = io.Copy(destination, source)
+					if err != nil {
+						return err
+					}
+					return nil
+
+				}(vaultFile, tmpDirectory)
+				if err != nil {
+					msg := fmt.Sprintf("Playbook vault file copy fail for cluster '%s'", clusterName)
+					return clitools.ExitOnErrorWithMessage(exitcode.RPC, msg)
+				} else {
+					list = append(list, ".vault")
+				}
+			}
+		}
+
 		// Make cleaned archive
 		err = func(tmpDirectory string, list []string, playBookArchivePath string) (err error) {
 
@@ -2255,9 +2403,14 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 		}
 		valuesOnRemote.Add(&rfc)
 
+		// If vault file, set it to absolute
+		if vaultFile != "" || askForVault {
+			vaultFile = fmt.Sprintf(" --vault-password-file %s.vault", ansibleDir)
+		}
+
 		// Unzip archive to final destination and run playbook
 		cmdStr := fmt.Sprintf(
-			"sudo chown cladm:root %s && sudo chmod 0774 %s && sudo -u cladm unzip -o %s -d %s && ([ -f %srequirements.yml ] && sudo -u cladm -i ansible-galaxy install -r %srequirements.yml || true) && sudo -u cladm -i ansible-playbook %splaybook.yml -i %s %s",
+			"sudo chown cladm:root %s && sudo chmod 0774 %s && sudo -u cladm unzip -o %s -d %s && ([ -f %srequirements.yml ] && sudo -u cladm -i ansible-galaxy install -r %srequirements.yml || true) && sudo -u cladm -i ansible-playbook %splaybook.yml -i %s%s %s",
 			rfc.Remote,
 			rfc.Remote,
 			rfc.Remote,
@@ -2266,6 +2419,7 @@ var clusterAnsiblePlaybookCommands = &cli.Command{
 			ansibleDir,
 			ansibleDir,
 			inventoryPath,
+			vaultFile,
 			strings.Join(filteredArgs, " "),
 		)
 
