@@ -2103,15 +2103,15 @@ func (instance *Host) finalizeProvisioning(ctx context.Context, userdataContent 
 			return xerr
 		}
 
-		var gwame string = gatewaySecurityGroup.GetName()
+		gwSgName := gatewaySecurityGroup.GetName()
 		// Remove temporary sg rules (on port 22)
 		for _, rule := range rules {
 			if rule.PortFrom == 22 && rule.Direction == securitygroupruledirection.Ingress {
-				logrus.Infof("Remove temporary gateway securitygroup '%s' rule '%s'", gwame, rule.Description)
+				logrus.Infof("Remove temporary gateway securitygroup '%s' rule '%s'", gwSgName, rule.Description)
 				// remove
 				xerr := gatewaySecurityGroup.DeleteRule(ctx, rule)
 				if xerr != nil {
-					logrus.Debugf("Fail to remove temporary gateway securitygroup '%s' rule '%s': '%s'", gwame, rule.Description, xerr)
+					logrus.Debugf("Fail to remove temporary gateway securitygroup '%s' rule '%s': '%s'", gwSgName, rule.Description, xerr)
 				}
 			}
 		}
