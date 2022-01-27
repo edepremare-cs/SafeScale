@@ -34,7 +34,7 @@ type Entry struct {
 	lock        *sync.RWMutex
 }
 
-// newEntry allocates a new cache entry
+// newEntry allocates a new MapCacheStore entry
 func newEntry(content Cacheable) Entry {
 	ce := Entry{
 		content: data.NewImmutableKeyValue(content.GetID(), content),
@@ -69,7 +69,7 @@ func (ce *Entry) LockContent() uint {
 	return ce.use
 }
 
-// UnlockContent decrements the counter of use of cache entry
+// UnlockContent decrements the counter of use of cached entry
 func (ce *Entry) UnlockContent() uint {
 	ce.lock.Lock()
 	defer ce.lock.Unlock()

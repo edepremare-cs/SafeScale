@@ -48,7 +48,7 @@ const (
 	curlPatch = "curl -kSsl -X PATCH --url https://localhost:8444/%s -H \"Content-Type:application/json\" -w \"\\n%%{http_code}\" -d @- <<'EOF'\n%s\nEOF\n"
 )
 
-var kongProxyCheckedCache cache.Cache
+var kongProxyCheckedCache cache.Store
 
 // KongController allows to control Kong, installed on a host
 type KongController struct {
@@ -573,7 +573,7 @@ func (k *KongController) parseResult(result string) (map[string]interface{}, str
 
 func init() {
 	var xerr fail.Error
-	kongProxyCheckedCache, xerr = cache.NewCache("proxychecks")
+	kongProxyCheckedCache, xerr = cache.NewMapStore("proxychecks")
 	if xerr != nil {
 		panic(xerr)
 	}

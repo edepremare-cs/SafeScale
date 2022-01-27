@@ -88,7 +88,7 @@ func TestParallelLockContent(t *testing.T) {
 	assert.EqualValues(t, uint(0), cacheEntry.LockCount())
 }
 
-func makeDeadlockHappy(mdh Cache) fail.Error {
+func makeDeadlockHappy(mdh Store) fail.Error {
 	// doing some stuff that ends up calling....
 	anotherRead, xerr := mdh.Entry("What")
 	if xerr != nil {
@@ -124,7 +124,7 @@ func TestDeadlock(t *testing.T) {
 		defer wg.Done()
 		content := newReservation("content" /*, time.Minute*/)
 
-		nukaCola, _ := NewCache("nuka")
+		nukaCola, _ := NewMapStore("nuka")
 		xerr := nukaCola.Reserve("What", 2*time.Second)
 		if xerr != nil {
 			t.Error(xerr)
@@ -132,7 +132,7 @@ func TestDeadlock(t *testing.T) {
 			return
 		}
 
-		// between reserve and commit, someone with a reference to our cache just checks its content
+		// between reserve and commit, someone with a reference to our cached just checks its content
 		xerr = makeDeadlockHappy(nukaCola)
 		t.Log(xerr)
 
@@ -164,7 +164,7 @@ func TestReserveCommitGet(t *testing.T) {
 		defer wg.Done()
 		content := newReservation("content" /*, time.Minute*/)
 
-		nukaCola, err := NewCache("nuka")
+		nukaCola, err := NewMapStore("nuka")
 		if err != nil {
 			t.Error(err)
 			t.Fail()
@@ -211,7 +211,7 @@ func TestReserveCommitGet(t *testing.T) {
 func TestMultipleReserveCommitGet(t *testing.T) {
 	wg := sync.WaitGroup{}
 	content := newReservation("content" /*, time.Minute*/)
-	nukaCola, err := NewCache("nuka")
+	nukaCola, err := NewMapStore("nuka")
 	require.Nil(t, err)
 
 	for i := 0; i < 10; i++ {
@@ -270,7 +270,7 @@ func TestSurprisingBehaviour(t *testing.T) {
 		defer wg.Done()
 		content := newReservation("content" /*, time.Minute*/)
 
-		nukaCola, err := NewCache("nuka")
+		nukaCola, err := NewMapStore("nuka")
 		if err != nil {
 			t.Error(err)
 			t.Fail()
@@ -297,10 +297,10 @@ func TestSurprisingBehaviour(t *testing.T) {
 
 		time.Sleep(1 * time.Second)
 
-		// This Entry should fail; "What" has been replacd by "content" during the commit (the key of cache entry follows content ID)
+		// This Entry should fail; "What" has been replacd by "content" during the commit (the key of cached entry follows content ID)
 		theX, xerr := nukaCola.Entry("What")
 		if xerr == nil {
-			t.Error("there is no cache entry identified by 'What', how can we find it?")
+			t.Error("there is no cached entry identified by 'What', how can we find it?")
 			t.Fail()
 			return
 		}
@@ -332,7 +332,7 @@ func TestDeadlockAddingEntry(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		nukaCola, err := NewCache("nuka")
+		nukaCola, err := NewMapStore("nuka")
 		if err != nil {
 			t.Error(err)
 			t.Fail()
@@ -363,7 +363,7 @@ func TestSignalChangeEntry(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		nukaCola, err := NewCache("nuka")
+		nukaCola, err := NewMapStore("nuka")
 		if err != nil {
 			t.Error(err)
 			t.Fail()
@@ -395,7 +395,7 @@ func TestSignalChangeEntry(t *testing.T) {
 }
 
 func TestFreeWhenConflictingReservationAlreadyThere(t *testing.T) {
-	rc, err := NewCache("nuka")
+	rc, err := NewMapStore("nuka")
 	if err != nil {
 		t.Error(err)
 		t.FailNow()

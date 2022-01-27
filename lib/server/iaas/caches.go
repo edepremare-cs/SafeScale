@@ -26,40 +26,40 @@ import (
 	"github.com/CS-SI/SafeScale/lib/utils/fail"
 )
 
-const (
-	cacheOptionOnMissKeyword        = "on_miss"
-	cacheOptionOnMissTimeoutKeyword = "on_miss_timeout"
-)
-
-// CacheMissOption returns []data.ImmutableKeyValue options to use on cache miss with timeout
-func CacheMissOption(fn func() (cache.Cacheable, fail.Error), timeout time.Duration) []data.ImmutableKeyValue {
-	if timeout <= 0 {
-		return []data.ImmutableKeyValue{
-			data.NewImmutableKeyValue(cacheOptionOnMissKeyword, func() (cache.Cacheable, fail.Error) {
-				return nil, fail.InvalidRequestError("invalid timeout for function provided to react on cache miss event: cannot be less or equal to 0")
-			}),
-			data.NewImmutableKeyValue(cacheOptionOnMissTimeoutKeyword, timeout),
-		}
-	}
-
-	if fn != nil {
-		return []data.ImmutableKeyValue{
-			data.NewImmutableKeyValue(cacheOptionOnMissKeyword, fn),
-			data.NewImmutableKeyValue(cacheOptionOnMissTimeoutKeyword, timeout),
-		}
-	}
-
-	return []data.ImmutableKeyValue{
-		data.NewImmutableKeyValue(cacheOptionOnMissKeyword, func() (cache.Cacheable, fail.Error) {
-			return nil, fail.InvalidRequestError("invalid function provided to react on cache miss event: cannot be nil")
-		}),
-		data.NewImmutableKeyValue(cacheOptionOnMissTimeoutKeyword, timeout),
-	}
-}
+// const (
+// 	cacheOptionOnMissKeyword        = "on_miss"
+// 	cacheOptionOnMissTimeoutKeyword = "on_miss_timeout"
+// )
+//
+// // CacheMissOption returns []data.ImmutableKeyValue options to use on cache miss with timeout
+// func CacheMissOption(fn func() (cache.Cacheable, fail.Error), timeout time.Duration) []data.ImmutableKeyValue {
+// 	if timeout <= 0 {
+// 		return []data.ImmutableKeyValue{
+// 			data.NewImmutableKeyValue(cacheOptionOnMissKeyword, func() (cache.Cacheable, fail.Error) {
+// 				return nil, fail.InvalidRequestError("invalid timeout for function provided to react on cache miss event: cannot be less or equal to 0")
+// 			}),
+// 			data.NewImmutableKeyValue(cacheOptionOnMissTimeoutKeyword, timeout),
+// 		}
+// 	}
+//
+// 	if fn != nil {
+// 		return []data.ImmutableKeyValue{
+// 			data.NewImmutableKeyValue(cacheOptionOnMissKeyword, fn),
+// 			data.NewImmutableKeyValue(cacheOptionOnMissTimeoutKeyword, timeout),
+// 		}
+// 	}
+//
+// 	return []data.ImmutableKeyValue{
+// 		data.NewImmutableKeyValue(cacheOptionOnMissKeyword, func() (cache.Cacheable, fail.Error) {
+// 			return nil, fail.InvalidRequestError("invalid function provided to react on cache miss event: cannot be nil")
+// 		}),
+// 		data.NewImmutableKeyValue(cacheOptionOnMissTimeoutKeyword, timeout),
+// 	}
+// }
 
 // ResourceCache contains the caches for all kinds of resources
 type ResourceCache struct {
-	byID   cache.Cache
+	byID   cache.Store
 	byName map[string]string
 	lock   sync.Mutex
 }
@@ -70,7 +70,7 @@ func NewResourceCache(name string) (*ResourceCache, fail.Error) {
 		return nil, fail.InvalidParameterCannotBeEmptyStringError("name")
 	}
 
-	cacheInstance, xerr := cache.NewCache(name)
+	cacheInstance, xerr := cache.NewMapStore(name)
 	if xerr != nil {
 		return &ResourceCache{}, xerr
 	}
@@ -109,13 +109,13 @@ func (instance *ResourceCache) Get(key string, options ...data.ImmutableKeyValue
 		)
 		for _, v := range options {
 			switch v.Key() {
-			case cacheOptionOnMissKeyword:
+			case cache.OptionOnMissKeyword:
 				var ok bool
 				onMissFunc, ok = v.Value().(func() (cache.Cacheable, fail.Error))
 				if !ok {
 					return nil, fail.InconsistentError("unable to set onMissFunc because of wrong cast: %v", v.Value())
 				}
-			case cacheOptionOnMissTimeoutKeyword:
+			case cache.OptionOnMissTimeoutKeyword:
 				var ok bool
 				onMissTimeout, ok = v.Value().(time.Duration)
 				if !ok {

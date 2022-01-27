@@ -93,7 +93,7 @@ func LoadNetwork(svc iaas.Service, ref string) (networkInstance resources.Networ
 		return nil, xerr
 	}
 
-	options := iaas.CacheMissOption(
+	options := cache.MissEventOption(
 		func() (cache.Cacheable, fail.Error) { return onNetworkCacheMiss(svc, ref) },
 		svc.Timings().MetadataTimeout(),
 	)

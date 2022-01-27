@@ -101,7 +101,7 @@ func LoadVolume(svc iaas.Service, ref string) (rv resources.Volume, ferr fail.Er
 		return VolumeNullValue(), xerr
 	}
 
-	options := iaas.CacheMissOption(
+	options := cache.MissEventOption(
 		func() (cache.Cacheable, fail.Error) { return onVolumeCacheMiss(svc, ref) },
 		svc.Timings().MetadataTimeout(),
 	)
