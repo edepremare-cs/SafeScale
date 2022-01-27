@@ -38,9 +38,9 @@ var (
 	templateBox *rice.Box
 	// emptyParams = map[string]interface{}{}
 
-	availableEmbeddedFeaturesMap = map[installmethod.Enum]map[string]*Feature{}
-	allEmbeddedFeaturesMap       = map[string]*Feature{}
-	allEmbeddedFeatures          []*Feature
+	availableEmbeddedFeaturesMap = map[installmethod.Enum]map[string]*FeatureFile{}
+	allEmbeddedFeaturesMap       = map[string]*FeatureFile{}
+	allEmbeddedFeatures          []*FeatureFile
 )
 
 func getSHA256Hash(text string) string {
@@ -93,14 +93,15 @@ func loadSpecFile(name string) (string, *viper.Viper, error) {
 }
 
 // dockerFeature ...
-func dockerFeature() *Feature {
+func dockerFeature() *FeatureFile {
 	name := "docker"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -109,14 +110,14 @@ func dockerFeature() *Feature {
 }
 
 // dockerSwarmFeature ...
-func dockerSwarmFeature() *Feature {
+func dockerSwarmFeature() *FeatureFile {
 	name := "docker-swarm"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -125,14 +126,14 @@ func dockerSwarmFeature() *Feature {
 }
 
 // ntpServerFeature ...
-func ntpServerFeature() *Feature {
+func ntpServerFeature() *FeatureFile {
 	name := "ntpserver"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -141,14 +142,14 @@ func ntpServerFeature() *Feature {
 }
 
 // ntpServerFeature ...
-func ntpClientFeature() *Feature {
+func ntpClientFeature() *FeatureFile {
 	name := "ntpclient"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -157,14 +158,14 @@ func ntpClientFeature() *Feature {
 }
 
 // ansibleFeature from official repos ...
-func ansibleFeature() *Feature {
+func ansibleFeature() *FeatureFile {
 	name := "ansible"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -189,14 +190,14 @@ func ansibleForClusterFeature() *Feature {
 }
 
 // certificateAuthorityFeature from official repos ...
-func certificateAuthorityFeature() *Feature {
+func certificateAuthorityFeature() *FeatureFile {
 	name := "certificateauthority"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -205,14 +206,14 @@ func certificateAuthorityFeature() *Feature {
 }
 
 // nVidiaDockerFeature ...
-func nVidiaDockerFeature() *Feature {
+func nVidiaDockerFeature() *FeatureFile {
 	name := "nvidiadocker"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -221,14 +222,14 @@ func nVidiaDockerFeature() *Feature {
 }
 
 // kubernetesFeature ...
-func kubernetesFeature() *Feature {
+func kubernetesFeature() *FeatureFile {
 	name := "kubernetes"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -237,14 +238,14 @@ func kubernetesFeature() *Feature {
 }
 
 // helm2Feature ...
-func helm2Feature() *Feature {
+func helm2Feature() *FeatureFile {
 	name := "helm2"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -253,14 +254,14 @@ func helm2Feature() *Feature {
 }
 
 // helm3Feature ...
-func helm3Feature() *Feature {
+func helm3Feature() *FeatureFile {
 	name := "helm3"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -269,14 +270,14 @@ func helm3Feature() *Feature {
 }
 
 // remoteDesktopFeature ...
-func remoteDesktopFeature() *Feature {
+func remoteDesktopFeature() *FeatureFile {
 	name := "remotedesktop"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -285,14 +286,14 @@ func remoteDesktopFeature() *Feature {
 }
 
 // proxycacheServerFeature ...
-func proxycacheServerFeature() *Feature {
+func proxycacheServerFeature() *FeatureFile {
 	name := "proxycache-server"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -301,14 +302,14 @@ func proxycacheServerFeature() *Feature {
 }
 
 // proxycacheClientFeature ...
-func proxycacheClientFeature() *Feature {
+func proxycacheClientFeature() *FeatureFile {
 	name := "proxycache-client"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -317,14 +318,14 @@ func proxycacheClientFeature() *Feature {
 }
 
 // postgres4gatewayFeature ...
-func postgres4gatewayFeature() *Feature {
+func postgres4gatewayFeature() *FeatureFile {
 	name := "postgres4gateway"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
@@ -333,14 +334,14 @@ func postgres4gatewayFeature() *Feature {
 }
 
 // edgeproxy4subnetFeature ...
-func edgeproxy4subnetFeature() *Feature {
+func edgeproxy4subnetFeature() *FeatureFile {
 	name := "edgeproxy4subnet"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
