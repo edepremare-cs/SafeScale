@@ -561,6 +561,20 @@ func (ff *FeatureFile) parseParameters() fail.Error {
 	return nil
 }
 
+func (ff *FeatureFile) parseVersionControl() fail.Error {
+	rootKeyword := "feature.versionControl"
+	if ff.specs.IsSet(rootKeyword) {
+		params, ok := ff.Specs().Get(rootKeyword).(map[interface{}]interface{})
+		if !ok {
+			return fail.SyntaxError("unsupported content for keyword 'feature.versionControl': must be a list")
+		}
+
+		ff.versionControl = data.ToMapStringOfString(params)
+	}
+
+	return nil
+}
+
 // parseInstallers reads 'feature.install' keyword and split up each triplet (installer method/action/step)
 func (ff *FeatureFile) parseInstallers() fail.Error {
 	// Does nothing yet, need to review step handling to differentiate a step definition and a step realization
