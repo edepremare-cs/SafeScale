@@ -49,10 +49,10 @@ type Feature interface {
 	GetDisplayFilename() string                                                                     // displays the filename of display (optionally adding '[embedded]' for embedded features)
 	GetFilename() string                                                                            // returns the filename of the feature
 	GetRequirements() (map[string]struct{}, fail.Error)                                             // returns the other features needed as requirements
-	ListParametersWithVersionControl() []string                                                         // returns a list of parameter containing version information
+	ListParametersWithControl() []string                                                            // returns a list of parameter containing version information
 	Remove(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error) // uninstalls the feature from the target
 	ToProtocol() *protocol.FeatureResponse
-	VersionForParameter(string) (string, fail.Error)                                                // Returns the version of a controlled parameter
+	VersionForParameter(string) (string, fail.Error) // Returns the version of a controlled parameter
 }
 
 // FeatureSettings are used to tune the feature
