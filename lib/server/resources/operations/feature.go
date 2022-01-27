@@ -26,7 +26,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/farmergreg/rfsnotify"
+	"github.com/CS-SI/SafeScale/lib/utils/data/observer"
+	"github.com/CS-SI/SafeScale/lib/utils/debug/callstack"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"golang.org/x/sys/unix"
@@ -43,7 +44,6 @@ import (
 	"github.com/CS-SI/SafeScale/lib/utils/concurrency"
 	"github.com/CS-SI/SafeScale/lib/utils/data"
 	"github.com/CS-SI/SafeScale/lib/utils/data/cache"
-	"github.com/CS-SI/SafeScale/lib/utils/data/observer"
 	"github.com/CS-SI/SafeScale/lib/utils/data/serialize"
 	"github.com/CS-SI/SafeScale/lib/utils/debug"
 	"github.com/CS-SI/SafeScale/lib/utils/debug/callstack"
@@ -56,47 +56,27 @@ const (
 	featureFileKind = "featurefile"
 )
 
-type featureFileSingleton struct {
-	cache *cache.SingleMemoryCache
-}
-
-var (
-	featureFileController featureFileSingleton
-	featureFileFolders    = []string{
-		"$HOME/.safescale/features",
-		"$HOME/.config/safescale/features",
-		"/etc/safescale/features",
-	}
-	cwdFeatureFileFolders = []string{
-		".",
-		"./features",
-		"./.safescale/features",
-	}
-)
+var featureFileCache *cache.SingleMemoryCache
 
 // FeatureParameter describes a Feature parameter as defined by Feature file content
 type FeatureParameter struct {
-	name             string // contains the name of the parameter
-	description      string // contains the description of the parameter
-	defaultValue     string // contains default value of the parameter
-	valueControlCode string
-	hasDefaultValue  bool // true if the parameter has a default value
-	hasValueControl  bool
+	name         string // contains the name of the parameter
+	description  string // contains the description of the parameter
+	hasDefault   bool   // true if the parameter has a default value
+	defaultValue string // contains default value of the parameter
 }
 
 // NewFeatureParameter initiales an new instance of FeatureParameter
-func NewFeatureParameter(name, description string, hasDefault bool, defaultValue string, hasValueControl bool, valueControlCode string) (FeatureParameter, fail.Error) {
+func NewFeatureParameter(name, description string, hasDefault bool, defaultValue string) (FeatureParameter, fail.Error) {
 	if name == "" {
 		return FeatureParameter{}, fail.InvalidParameterCannotBeEmptyStringError("name")
 	}
 
 	out := FeatureParameter{
-		name:             name,
-		description:      description,
-		hasDefaultValue:  hasDefault,
-		defaultValue:     defaultValue,
-		hasValueControl:  hasValueControl,
-		valueControlCode: valueControlCode,
+		name:         name,
+		description:  description,
+		hasDefault:   hasDefault,
+		defaultValue: defaultValue,
 	}
 	return out, nil
 }
@@ -113,27 +93,13 @@ func (fp FeatureParameter) Description() string {
 
 // HasDefaultValue tells if the parameter has a default value
 func (fp FeatureParameter) HasDefaultValue() bool {
-	return fp.hasDefaultValue
+	return fp.hasDefault
 }
 
 // DefaultValue returns the default value of the parameter
 func (fp FeatureParameter) DefaultValue() (string, bool) {
-	if fp.hasDefaultValue {
+	if fp.hasDefault {
 		return fp.defaultValue, true
-	}
-
-	return "", false
-}
-
-// HasValueControl tells if the parameter has a value control
-func (fp FeatureParameter) HasValueControl() bool {
-	return fp.hasValueControl
-}
-
-// ValueControlCode returns the bash code to control the value
-func (fp FeatureParameter) ValueControlCode() (string, bool) {
-	if fp.hasValueControl {
-		return fp.valueControlCode, true
 	}
 
 	return "", false
@@ -193,10 +159,9 @@ type FeatureFile struct {
 
 func newFeatureFile() *FeatureFile {
 	return &FeatureFile{
-		parameters:     map[string]FeatureParameter{},
-		versionControl: map[string]string{},
-		observersLock:  &sync.RWMutex{},
-		observers:      map[string]observer.Observer{},
+		parameters:    map[string]FeatureParameter{},
+		observersLock: &sync.RWMutex{},
+		observers:     map[string]observer.Observer{},
 	}
 }
 
@@ -388,11 +353,11 @@ func LoadFeatureFile(svc iaas.Service, name string, embeddedOnly bool) (_ *Featu
 		func() (cache.Cacheable, fail.Error) { return onFeatureFileCacheMiss(svc, name, embeddedOnly) },
 		svc.Timings().MetadataTimeout(),
 	)
-	ce, xerr := featureFileController.cache.Get(name, cacheOptions...)
+	ce, xerr := featureFileCache.Get(name, cacheOptions...)
 	if xerr != nil {
-		logrus.Error(callstack.DecorateWith("", xerr.Error(), "", 0))
 		switch xerr.(type) {
 		case *fail.ErrNotFound:
+			debug.IgnoreError(xerr)
 			return nil, fail.NotFoundError("failed to find Feature '%s'", name)
 		default:
 			return nil, xerr
@@ -427,11 +392,17 @@ func onFeatureFileCacheMiss(_ iaas.Service, name string, embeddedOnly bool) (cac
 			return nil, xerr
 		}
 
-		logrus.Tracef("Loaded Feature '%s' (%s)", newInstance.DisplayFilename(), newInstance.Filename())
+		logrus.Tracef("Loaded feature '%s' (%s)", newInstance.DisplayFilename(), newInstance.Filename())
 	} else {
 		v := viper.New()
-		setViperConfigPathes(v)
+		v.AddConfigPath(".")
+		v.AddConfigPath("./features")
+		v.AddConfigPath("./.safescale/features")
+		v.AddConfigPath("$HOME/.safescale/features")
+		v.AddConfigPath("$HOME/.config/safescale/features")
+		v.AddConfigPath("/etc/safescale/features")
 		v.SetConfigName(name)
+
 		err := v.ReadInConfig()
 		err = debug.InjectPlannedError(err)
 		if err != nil {
@@ -449,7 +420,6 @@ func onFeatureFileCacheMiss(_ iaas.Service, name string, embeddedOnly bool) (cac
 			if !v.IsSet("feature") {
 				return nil, fail.SyntaxError("missing keyword 'feature' at the beginning of the file")
 			}
-
 			newInstance = &FeatureFile{
 				fileName:        v.ConfigFileUsed(),
 				displayFileName: v.ConfigFileUsed(),
@@ -459,7 +429,7 @@ func onFeatureFileCacheMiss(_ iaas.Service, name string, embeddedOnly bool) (cac
 			}
 		}
 
-		logrus.Tracef("Loaded Feature '%s' (%s)", newInstance.DisplayFilename(), newInstance.Filename())
+		logrus.Tracef("Loaded feature '%s' (%s)", newInstance.DisplayFilename(), newInstance.Filename())
 
 		// if we can log the sha256 of the feature, do it
 		filename := v.ConfigFileUsed()
@@ -469,7 +439,7 @@ func onFeatureFileCacheMiss(_ iaas.Service, name string, embeddedOnly bool) (cac
 				return nil, fail.ConvertError(err)
 			}
 
-			logrus.Tracef("Loaded Feature '%s' SHA256:%s", name, getSHA256Hash(string(content)))
+			logrus.Tracef("Loaded feature '%s' SHA256:%s", name, getSHA256Hash(string(content)))
 		}
 	}
 
@@ -507,6 +477,11 @@ func (ff *FeatureFile) Parse() fail.Error {
 		return xerr
 	}
 
+	xerr = ff.parseVersionControl()
+	if xerr != nil {
+		return xerr
+	}
+
 	xerr = ff.parseInstallers()
 	if xerr != nil {
 		return xerr
@@ -537,7 +512,7 @@ func (ff *FeatureFile) parseParameters() fail.Error {
 				if hasDefaultValue {
 					defaultValue = splitted[1]
 				}
-				newParam, xerr := NewFeatureParameter(name, "", hasDefaultValue, defaultValue, false, "")
+				newParam, xerr := NewFeatureParameter(name, "", hasDefaultValue, defaultValue)
 				if xerr != nil {
 					return xerr
 				}
@@ -556,16 +531,35 @@ func (ff *FeatureFile) parseParameters() fail.Error {
 
 				description, _ := casted["description"] // nolint
 				value, hasDefaultValue := casted["value"]
-				valueControlCode, hasValueControl := casted["control"]
-				newParam, xerr := NewFeatureParameter(name, description, hasDefaultValue, value, hasValueControl, valueControlCode)
+				newParam, xerr := NewFeatureParameter(name, description, hasDefaultValue, value)
 				if xerr != nil {
 					return xerr
 				}
+
 				ff.parameters[name] = newParam
 
 			default:
 				return fail.SyntaxError("unsupported content for keyword 'feature.parameters': must be a list of string or struct")
 			}
+		}
+	}
+
+	return nil
+}
+
+func (ff *FeatureFile) parseVersionControl() fail.Error {
+	rootKeyword := "feature.versionControl"
+	if ff.specs.IsSet(rootKeyword) {
+		keyword := rootKeyword + ".components"
+		field := ff.specs.GetString(keyword)
+		if field == "" {
+			return fail.SyntaxError("missing or empty keyword '%s'", keyword)
+		}
+		components := strings.Split(field, ",")
+
+		for _, v := range components {
+			keyword = rootKeyword + ".retrievers" + v
+			ff.versionControl[v] = ff.specs.GetString(keyword)
 		}
 	}
 
@@ -618,16 +612,16 @@ func ListFeatures(svc iaas.Service, suitableFor string) (_ []interface{}, xerr f
 			debug.IgnoreError(err)
 			continue
 		}
-		for _, f := range files {
-			if strings.HasSuffix(strings.ToLower(f.Name()), ".yml") {
-				featFile, xerr := LoadFeatureFile(svc, strings.Replace(strings.ToLower(f.Name()), ".yml", "", 1), false)
-				xerr = debug.InjectPlannedFail(xerr)
-				if xerr != nil {
-					logrus.Warn(xerr) // Don't hide errors
-					continue
-				}
+        for _, f := range files {
+            if strings.HasSuffix(strings.ToLower(f.Name()), ".yml") {
+                featFile, xerr := LoadFeatureFile(svc, strings.Replace(strings.ToLower(f.Name()), ".yml", "", 1), false)
+                xerr = debug.InjectPlannedFail(xerr)
+                if xerr != nil {
+                    logrus.Warn(xerr) // Don't hide errors
+                    continue
+                }
 
-				list[featFile.GetName()] = featFile
+                list[featFile.GetName()] = featFile
 			}
 		}
 	}
@@ -716,8 +710,8 @@ func NewEmbeddedFeature(svc iaas.Service, name string) (_ resources.Feature, xer
 }
 
 // IsNull tells if the instance represents a null value
-func (instance *Feature) IsNull() bool {
-	return instance == nil || instance.file == nil
+func (f *Feature) IsNull() bool {
+	return f == nil || f.file == nil
 }
 
 // Clone ...
@@ -757,7 +751,7 @@ func (instance *Feature) GetName() string {
 		return ""
 	}
 
-	return instance.file.displayName
+	return f.file.displayName
 }
 
 // GetID ...
@@ -774,7 +768,7 @@ func (instance *Feature) GetFilename() string {
 		return ""
 	}
 
-	return instance.file.fileName
+	return f.file.fileName
 }
 
 // GetDisplayFilename returns the filename of the Feature definition, beautifulled, with error handling
@@ -782,7 +776,7 @@ func (instance *Feature) GetDisplayFilename() string {
 	if instance.IsNull() {
 		return ""
 	}
-	return instance.file.displayFileName
+	return f.file.displayFileName
 }
 
 // installerOfMethod instanciates the right installer corresponding to the method
@@ -812,7 +806,7 @@ func (instance *Feature) Specs() *viper.Viper {
 		return &viper.Viper{}
 	}
 
-	return instance.file.Specs()
+	return f.file.Specs()
 }
 
 // Applicable tells if the Feature is installable on the target
@@ -909,7 +903,7 @@ func (instance *Feature) Check(ctx context.Context, target resources.Targetable,
 	logrus.Debugf("Checking if Feature '%s' is installed on %s '%s'...\n", featureName, targetType, targetName)
 
 	// Inits and checks target parameters
-	conditionedParameters, xerr := instance.conditionParameters(v)
+	conditionedParameters, xerr := f.conditionParameters(v)
 	if xerr != nil {
 		return nil, xerr
 	}
@@ -942,15 +936,15 @@ func (instance *Feature) Check(ctx context.Context, target resources.Targetable,
 // Returned error may be:
 //  - nil: everything went well
 //  - fail.InvalidRequestError: a required parameter is missing (value not provided in externals and no default value defined)
-func (instance Feature) conditionParameters(externals data.Map) (ConditionedFeatureParameters, fail.Error) {
+func (f Feature) conditionParameters(externals data.Map) (ConditionedFeatureParameters, fail.Error) {
 	var xerr fail.Error
 	conditioned := make(ConditionedFeatureParameters)
-	for k, v := range instance.file.parameters {
+	for k, v := range f.file.parameters {
 		value, ok := externals[k].(string)
 		if ok {
 			conditioned[k], xerr = NewConditionedFeatureParameter(v, &value)
 		} else {
-			value, ok := externals[instance.GetName()+":"+k].(string)
+			value, ok := externals[f.GetName()+":"+k].(string)
 			if ok {
 				conditioned[k], xerr = NewConditionedFeatureParameter(v, &value)
 			} else {
@@ -967,7 +961,7 @@ func (instance Feature) conditionParameters(externals data.Map) (ConditionedFeat
 // findInstallerForTarget isolates the available installer to use for target (one that is define in the file and applicable on target)
 func (instance *Feature) findInstallerForTarget(target resources.Targetable, action string) (installer Installer, xerr fail.Error) {
 	methods := target.InstallMethods()
-	w := instance.file.specs.GetStringMap("feature.install")
+	w := f.file.specs.GetStringMap("feature.install")
 	for i := uint8(1); i <= uint8(len(methods)); i++ {
 		meth := methods[i]
 		if _, ok := w[strings.ToLower(meth.String())]; ok {
@@ -1076,7 +1070,7 @@ func (instance *Feature) Add(ctx context.Context, target resources.Targetable, v
 	}
 
 	// Inits and checks target parameters
-	conditionedParameters, xerr := instance.conditionParameters(v)
+	conditionedParameters, xerr := f.conditionParameters(v)
 	if xerr != nil {
 		return nil, xerr
 	}
@@ -1186,7 +1180,7 @@ func (instance *Feature) Remove(ctx context.Context, target resources.Targetable
 	)()
 
 	// Inits and checks target parameters
-	conditionedParameters, xerr := instance.conditionParameters(v)
+	conditionedParameters, xerr := f.conditionParameters(v)
 	if xerr != nil {
 		return nil, xerr
 	}
@@ -1231,16 +1225,16 @@ func (instance *Feature) GetRequirements() (map[string]struct{}, fail.Error) {
 		return emptyMap, fail.InvalidInstanceError()
 	}
 
-	out := make(map[string]struct{}, len(instance.file.specs.GetStringSlice(yamlKey)))
-	for _, r := range instance.file.specs.GetStringSlice(yamlKey) {
+	out := make(map[string]struct{}, len(f.file.specs.GetStringSlice(yamlKey)))
+	for _, r := range f.file.specs.GetStringSlice(yamlKey) {
 		out[r] = struct{}{}
 	}
 	return out, nil
 }
 
 // installRequirements walks through requirements and installs them if needed
-func (instance *Feature) installRequirements(ctx context.Context, t resources.Targetable, v data.Map, s resources.FeatureSettings) fail.Error {
-	if instance.file.specs.IsSet(yamlKey) {
+func (f *Feature) installRequirements(ctx context.Context, t resources.Targetable, v data.Map, s resources.FeatureSettings) fail.Error {
+	if f.file.specs.IsSet(yamlKey) {
 		{
 			msgHead := fmt.Sprintf("Checking requirements of Feature '%s'", instance.GetName())
 			var msgTail string
@@ -1258,8 +1252,8 @@ func (instance *Feature) installRequirements(ctx context.Context, t resources.Ta
 		targetIsCluster := t.TargetType() == featuretargettype.Cluster
 
 		// clone FeatureSettings to set DoNotUpdateHostMetadataInClusterContext
-		for _, requirement := range instance.file.specs.GetStringSlice(yamlKey) {
-			needed, xerr := NewFeature(instance.svc, requirement)
+		for _, requirement := range f.file.specs.GetStringSlice(yamlKey) {
+			needed, xerr := NewFeature(f.svc, requirement)
 			xerr = debug.InjectPlannedFail(xerr)
 			if xerr != nil {
 				return fail.Wrap(xerr, "failed to find required Feature '%s'", requirement)
@@ -1390,219 +1384,10 @@ func ExtractFeatureParameters(params []string) data.Map {
 	return out
 }
 
-func setViperConfigPathes(v *viper.Viper) {
-	if v != nil {
-		for _, i := range featureFileFolders {
-			v.AddConfigPath(i)
-		}
-	}
-}
-
-// watchFeatureFileFolders watches folders that may contain Feature Files and react to changes (invalidating cache entry
-// already loaded)
-func watchFeatureFileFolders() error {
-	watcher, err := rfsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = watcher.Close() }()
-
-	done := make(chan bool)
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				onFeatureFileEvent(watcher, event)
-
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				logrus.Error("Feature File watcher returned an error: ", err)
-			}
-		}
-	}()
-
-	// get current dir
-	cwd, _ := os.Getwd()
-
-	// get homedir
-	home := os.Getenv("HOME")
-	if home == "" {
-		home, _ = os.UserHomeDir()
-	}
-
-	for k := range featureFileFolders {
-		if strings.HasPrefix(featureFileFolders[k], "$HOME") {
-			if home != "" {
-				featureFileFolders[k] = home + strings.TrimPrefix(featureFileFolders[k], "$HOME")
-			} else {
-				continue
-			}
-		} else if strings.HasPrefix(featureFileFolders[k], ".") {
-			if cwd != "" {
-				featureFileFolders[k] = cwd + strings.TrimPrefix(featureFileFolders[k], ".")
-			} else {
-				continue
-			}
-		}
-
-		err = addPathToWatch(watcher, featureFileFolders[k])
-		if err != nil {
-			return err
-		}
-	}
-
-	// FIXME: disabled for now, need to add a flag or configuration option to make this part optional
-	// for k := range cwdFeatureFileFolders {
-	// 	if strings.HasPrefix(cwdFeatureFileFolders[k], "$HOME") {
-	// 		if home != "" {
-	// 			cwdFeatureFileFolders[k] = home + strings.TrimPrefix(cwdFeatureFileFolders[k], "$HOME")
-	// 		} else {
-	// 			continue
-	// 		}
-	// 	} else if strings.HasPrefix(cwdFeatureFileFolders[k], ".") {
-	// 		if cwd != "" {
-	// 			cwdFeatureFileFolders[k] = cwd + strings.TrimPrefix(cwdFeatureFileFolders[k], ".")
-	// 		} else {
-	// 			continue
-	// 		}
-	// 	}
-	//
-	// 	err = addPathToWatch(watcher, cwdFeatureFileFolders[k])
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
-
-	<-done
-	return nil
-}
-
-func addPathToWatch(w *rfsnotify.RWatcher, path string) error {
-	err := w.AddRecursive(path)
-	if err != nil {
-		switch casted := err.(type) {
-		case *fs.PathError:
-			switch casted.Err {
-			case unix.ENOENT:
-				// folder not found, ignore it
-				debug.IgnoreError(err)
-			default:
-				logrus.Error(err)
-				return err
-			}
-		default:
-			logrus.Error(err)
-			return err
-		}
-	}
-
-	logrus.Debugf("adding monitoring of folder '%s' for Feature file changes", path)
-	return nil
-}
-
-// onFeatureFileEvent reacts to filesystem change event
-func onFeatureFileEvent(w *rfsnotify.RWatcher, e fsnotify.Event) {
-	switch {
-	case e.Op&fsnotify.Chmod == fsnotify.Chmod:
-		fallthrough
-	case e.Op&fsnotify.Remove == fsnotify.Remove:
-		fallthrough
-	case e.Op&fsnotify.Rename == fsnotify.Rename:
-		fallthrough
-	case e.Op&fsnotify.Write == fsnotify.Write:
-		relativeName := reduceFilename(e.Name)
-		stat, err := os.Stat(e.Name)
-		if err == nil {
-			if stat.IsDir() {
-				// If the fs object is a folder, do nothing more
-				return
-			}
-
-			// If the fs object is a file and is still readable, do nothing more
-			if e.Op&fsnotify.Chmod == fsnotify.Chmod {
-				fd, err := os.Open(e.Name)
-				if err == nil {
-					_ = fd.Close()
-					return
-				}
-			}
-		}
-
-		// From here, we need to invalidate cache entry, either because content has changed or file have been removed/renamed or updated
-		featureName := relativeName
-		if strings.HasSuffix(relativeName, ".yaml") {
-			featureName = strings.TrimSuffix(relativeName, ".yaml")
-		}
-		if strings.HasSuffix(relativeName, ".yml") {
-			featureName = strings.TrimSuffix(relativeName, ".yml")
-		}
-		if len(featureName) != len(relativeName) {
-			featureName = strings.TrimPrefix(featureName, "/")
-			_, xerr := featureFileController.cache.Get(featureName)
-			if xerr == nil {
-				xerr = featureFileController.cache.FreeEntry(featureName)
-			}
-			if xerr != nil {
-				switch xerr.(type) {
-				case *fail.ErrNotFound:
-					// No cache corresponding, ignore the error
-					debug.IgnoreError(xerr)
-				default:
-					// otherwise, log it
-					logrus.Error(xerr)
-				}
-			}
-		}
-
-	case e.Op&fsnotify.Create == fsnotify.Create:
-		// If the object created is a path, add it to RWatcher (if it's a file, nothing more to do, cache miss will
-		// do the necessary in time
-		fi, err := os.Stat(e.Name)
-		if err == nil && fi.IsDir() {
-			_ = w.AddRecursive(e.Name)
-		}
-	}
-}
-
-// reduceFilename removes the absolute part of 'name' corresponding to folder
-func reduceFilename(name string) string {
-	last := name
-	for _, v := range featureFileFolders {
-		if strings.HasPrefix(name, v) {
-			reduced := strings.TrimPrefix(name, v)
-			if len(reduced) < len(last) {
-				last = reduced
-			}
-		}
-	}
-	for _, v := range cwdFeatureFileFolders {
-		if strings.HasPrefix(name, v) {
-			reduced := strings.TrimPrefix(name, v)
-			if len(reduced) < len(last) {
-				last = reduced
-			}
-		}
-	}
-	return last
-}
-
 func init() {
 	var xerr fail.Error
-	featureFileController.cache, xerr = cache.NewSingleMemoryCache(featureFileKind)
+	featureFileCache, xerr = cache.NewSingleMemoryCache(featureFileKind)
 	if xerr != nil {
 		panic(xerr.Error())
 	}
-
-	// Starts go routine watching changes in Feature File folders
-	go func() {
-		err := watchFeatureFileFolders()
-		if err != nil {
-			logrus.Error(err)
-		}
-	}()
 }
