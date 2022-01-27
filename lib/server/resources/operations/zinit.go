@@ -25,8 +25,7 @@ import (
 )
 
 func init() {
-
-	allEmbeddedFeatures = []*Feature{
+	allEmbeddedFeatures = []*FeatureFile{
 		dockerFeature(),
 		dockerSwarmFeature(),
 		ntpServerFeature(),
@@ -71,7 +70,7 @@ func init() {
 		for k := range installers {
 			meth, err := installmethod.Parse(k)
 			if err != nil {
-				displayFilename := item.GetDisplayFilename()
+				displayFilename := item.DisplayFilename()
 				if displayFilename == "" {
 					logrus.Errorf(fmt.Sprintf("syntax error in feature '%s' specification file, install method '%s' is unknown", itemName, k))
 				} else {
@@ -80,7 +79,7 @@ func init() {
 				continue
 			}
 			if _, found := availableEmbeddedFeaturesMap[meth]; !found {
-				availableEmbeddedFeaturesMap[meth] = map[string]*Feature{
+				availableEmbeddedFeaturesMap[meth] = map[string]*FeatureFile{
 					itemName: item,
 				}
 			} else {
