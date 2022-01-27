@@ -161,7 +161,7 @@ func LoadShare(svc iaas.Service, ref string) (rs resources.Share, ferr fail.Erro
 		return nil, xerr
 	}
 
-	options := iaas.CacheMissOption(
+	options := cache.MissEventOption(
 		func() (cache.Cacheable, fail.Error) { return onShareCacheMiss(svc, ref) },
 		svc.Timings().MetadataTimeout(),
 	)

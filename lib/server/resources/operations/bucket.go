@@ -89,7 +89,7 @@ func LoadBucket(svc iaas.Service, name string) (b resources.Bucket, xerr fail.Er
 		return nil, xerr
 	}
 
-	cacheOptions := iaas.CacheMissOption(
+	cacheOptions := cache.MissEventOption(
 		func() (cache.Cacheable, fail.Error) { return onBucketCacheMiss(svc, name) },
 		svc.Timings().MetadataTimeout(),
 	)

@@ -132,7 +132,7 @@ func LoadSecurityGroup(svc iaas.Service, ref string) (sgInstance *SecurityGroup,
 		return nil, fail.Wrap(xerr, "failed to get cache for Security Groups")
 	}
 
-	options := iaas.CacheMissOption(
+	options := cache.MissEventOption(
 		func() (cache.Cacheable, fail.Error) { return onSGCacheMiss(svc, ref) },
 		svc.Timings().MetadataTimeout(),
 	)

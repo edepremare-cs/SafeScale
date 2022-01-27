@@ -144,7 +144,7 @@ func LoadHost(svc iaas.Service, ref string, options ...data.ImmutableKeyValue) (
 		}
 	}
 
-	cacheOptions := iaas.CacheMissOption(
+	cacheOptions := cache.MissEventOption(
 		func() (cache.Cacheable, fail.Error) { return onHostCacheMiss(svc, ref, updateCachedInformation) },
 		svc.Timings().MetadataTimeout(),
 	)

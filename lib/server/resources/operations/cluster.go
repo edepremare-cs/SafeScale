@@ -169,7 +169,7 @@ func LoadCluster(ctx context.Context, svc iaas.Service, name string) (_ resource
 		return nil, xerr
 	}
 
-	options := iaas.CacheMissOption(
+	options := cache.MissEventOption(
 		func() (cache.Cacheable, fail.Error) { return onClusterCacheMiss(ctx, svc, name) },
 		svc.Timings().MetadataTimeout(),
 	)

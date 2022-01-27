@@ -263,7 +263,7 @@ func LoadSubnet(svc iaas.Service, networkRef, subnetRef string) (subnetInstance 
 			return nil, xerr
 		}
 
-		options := iaas.CacheMissOption(
+		options := cache.MissEventOption(
 			func() (cache.Cacheable, fail.Error) { return onSubnetCacheMiss(svc, subnetID) },
 			svc.Timings().MetadataTimeout(),
 		)
