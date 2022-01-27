@@ -612,16 +612,16 @@ func ListFeatures(svc iaas.Service, suitableFor string) (_ []interface{}, xerr f
 			debug.IgnoreError(err)
 			continue
 		}
-        for _, f := range files {
-            if strings.HasSuffix(strings.ToLower(f.Name()), ".yml") {
-                featFile, xerr := LoadFeatureFile(svc, strings.Replace(strings.ToLower(f.Name()), ".yml", "", 1), false)
-                xerr = debug.InjectPlannedFail(xerr)
-                if xerr != nil {
-                    logrus.Warn(xerr) // Don't hide errors
-                    continue
-                }
+		for _, f := range files {
+			if strings.HasSuffix(strings.ToLower(f.Name()), ".yml") {
+				featFile, xerr := LoadFeatureFile(svc, strings.Replace(strings.ToLower(f.Name()), ".yml", "", 1), false)
+				xerr = debug.InjectPlannedFail(xerr)
+				if xerr != nil {
+					logrus.Warn(xerr) // Don't hide errors
+					continue
+				}
 
-                list[featFile.GetName()] = featFile
+				list[featFile.GetName()] = featFile
 			}
 		}
 	}
