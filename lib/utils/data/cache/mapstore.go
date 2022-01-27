@@ -16,11 +16,7 @@
 
 package cache
 
-<<<<<<< feature/features-enhancements
-//go:generate minimock -o ../mocks/mock_clonable.go -i github.com/CS-SI/SafeScale/lib/utils/data/cached.MapStore
-=======
 //go:generate minimock -o ../mocks/mock_clonable.go -i github.com/CS-SI/SafeScale/lib/utils/data/cached.cached
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 
 import (
 	"fmt"
@@ -38,15 +34,9 @@ import (
 
 type MapStore struct {
 	name     atomic.Value
-<<<<<<< feature/features-enhancements
-	lock     sync.Mutex
-	cached   map[string]*Entry
-	reserved map[string]*reservation
-=======
 	lock     sync.RWMutex
 	cached   map[string]*Entry
 	reserved map[string]*Entry
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 }
 
 // NewMapStore creates a new cache storage based on map (thread-safe)
@@ -57,11 +47,7 @@ func NewMapStore(name string) (Store, fail.Error) {
 
 	instance := &MapStore{
 		cached:   map[string]*Entry{},
-<<<<<<< feature/features-enhancements
-		reserved: map[string]*reservation{},
-=======
 		reserved: map[string]*Entry{},
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 	}
 	instance.name.Store(name)
 	return instance, nil
@@ -90,29 +76,6 @@ func (instance *MapStore) Entry(key string) (*Entry, fail.Error) {
 		return nil, fail.InvalidParameterCannotBeEmptyStringError("id")
 	}
 
-<<<<<<< feature/features-enhancements
-	instance.lock.Lock()
-	defer instance.lock.Unlock()
-
-	// If key is reserved, we may have to wait reservation committed, freed or timed out
-	reservation, ok := instance.reserved[key]
-	if ok {
-		xerr := reservation.WaitReleased()
-		if xerr != nil {
-			switch xerr.(type) {
-			case *fail.ErrDuplicate:
-				// We want the cache entry, so this error is attended, continue
-
-			case *fail.ErrTimeout:
-				derr := instance.unsafeFreeEntry(key)
-				if derr != nil {
-					_ = xerr.AddConsequence(derr)
-				}
-				return nil, fail.NotFoundError("failed to find entry '%s' in %s cache: %v", key, instance.GetName(), xerr)
-
-			default:
-				return nil, xerr
-=======
 	instance.lock.RLock()
 	defer instance.lock.RUnlock()
 
@@ -149,22 +112,15 @@ func (instance *MapStore) Entry(key string) (*Entry, fail.Error) {
 				}
 
 				return nil, fail.Wrap(fail.TimeoutError(nil, reservation.timeout, "reservation for entry with key '%s' in %s cached has expired", key, instance.GetName()), "failed to find entry '%s' in %s cached", key, instance.GetName())
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 			}
 		}
 	}
 
-<<<<<<< feature/features-enhancements
-=======
 	// If key is found in cached, returns corresponding *cached.Entry
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 	if ce, ok := instance.cached[key]; ok {
 		return ce, nil
 	}
 
-<<<<<<< feature/features-enhancements
-	return nil, fail.NotFoundError("failed to find entry with key '%s' in %s cache", key, instance.GetName())
-=======
 	return nil, fail.NotFoundError("failed to find entry with key '%s' in %s cached", key, instance.GetName())
 }
 
@@ -173,7 +129,6 @@ func (instance *MapStore) reservationExpired(key string) fail.Error {
 	defer instance.lock.RLock()
 
 	return instance.Free(key)
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 }
 
 /*
@@ -195,45 +150,6 @@ func (instance *MapStore) Reserve(key string, timeout time.Duration) (xerr fail.
 		return fail.InvalidParameterError("timeout", "cannot be 0")
 	}
 
-<<<<<<< feature/features-enhancements
-	// If key is already reserved, we may have to wait reservation committed or freed to determine if we can effectively reserve it
-	instance.lock.Lock()
-	defer instance.lock.Unlock()
-
-	if _, ok := instance.reserved[key]; ok {
-		ce, ok := instance.cached[key]
-		if !ok {
-			return fail.InconsistentError("reserved entry '%s' in %s cache does not have a corresponding cached entry", key, instance.GetName())
-		}
-
-		reservation, ok := ce.Content().(*reservation)
-		if !ok {
-			// May have transitioned from reservation content to real content, first check that there is no more reservation...
-			if _, ok := instance.reserved[key]; ok {
-				xerr = fail.NotAvailableError("the entry '%s' of %s cache is already reserved", key, instance.GetName())
-				logrus.Errorf(callstack.DecorateWith("", xerr.Error(), "", 0))
-				return xerr
-			}
-		} else {
-			xerr := reservation.WaitReleased()
-			if xerr != nil {
-				switch xerr.(type) {
-				case *fail.ErrDuplicate:
-					return xerr
-
-				case *fail.ErrTimeout:
-					derr := instance.unsafeFreeEntry(key)
-					if derr != nil {
-						_ = xerr.AddConsequence(derr)
-					}
-					// continue to reserve entry
-
-				default:
-					return xerr
-				}
-			}
-		}
-=======
 	instance.lock.Lock()
 	defer instance.lock.Unlock()
 
@@ -249,7 +165,6 @@ func (instance *MapStore) unsafeReserveEntry(key string, timeout time.Duration) 
 	}
 	if _, ok := instance.cached[key]; ok {
 		return fail.DuplicateError(callstack.DecorateWith("", "", fmt.Sprintf("there is already an entry with key '%s' in the %s cached", key, instance.GetName()), 0))
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 	}
 
 	content := newReservation(key)
@@ -257,11 +172,7 @@ func (instance *MapStore) unsafeReserveEntry(key string, timeout time.Duration) 
 	ce := newEntry(content)
 	pce := &ce
 	instance.cached[key] = pce
-<<<<<<< feature/features-enhancements
-	instance.reserved[key] = content
-=======
 	instance.reserved[key] = pce
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 	return nil
 }
 
@@ -288,35 +199,6 @@ func (instance *MapStore) Commit(key string, content Cacheable) (ce *Entry, xerr
 	instance.lock.Lock()
 	defer instance.lock.Unlock()
 
-<<<<<<< feature/features-enhancements
-	if _, ok := instance.reserved[key]; !ok {
-		// return nil, fail.NotFoundError("the cached entry '%s' is not reserved (may have expired)", key)
-		return nil, fail.NotFoundError(callstack.DecorateWith("", fmt.Sprintf("the cache entry '%s' is not reserved (may have expired)", key), "", 0))
-	}
-
-	// content may bring new key, based on content.ID(), different from the key reserved; we have to check if this new key has not been reserved by someone else...
-	var reservedEntry *reservation
-	newContentKey := content.GetID()
-	if newContentKey != key {
-		var ok bool
-		reservedEntry, ok = instance.reserved[newContentKey]
-		if ok {
-			return nil, fail.NotAvailableError("the cached entry '%s' in %s cache, corresponding to the new ID of the content, is reserved; content cannot be committed", newContentKey, instance.name)
-		}
-		if _, ok := instance.cached[content.GetID()]; ok {
-			return nil, fail.DuplicateError("the cached entry '%s' in %s cache, corresponding to the new ID of the content, is already used; content cannot be committed", newContentKey, instance.name)
-		}
-	}
-	if reservedEntry != nil {
-		if reservedEntry.timeout < time.Since(reservedEntry.created) {
-			// reservation has expired...
-			cleanErr := fail.TimeoutError(nil, reservedEntry.timeout, "reservation of key '%s' in %s cache has expired")
-			derr := instance.unsafeFreeEntry(key)
-			if derr != nil {
-				_ = cleanErr.AddConsequence(derr)
-			}
-			return nil, cleanErr
-=======
 	return instance.unsafeCommitEntry(key, content)
 }
 
@@ -351,7 +233,6 @@ func (instance *MapStore) unsafeCommitEntry(key string, content Cacheable) (_ *E
 				}
 				return nil, cleanErr
 			}
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 		}
 	}
 
@@ -389,16 +270,6 @@ func (instance *MapStore) unsafeCommitEntry(key string, content Cacheable) (_ *E
 		return cacheEntry, nil
 	}
 
-<<<<<<< feature/features-enhancements
-	return nil, fail.InconsistentError("the reservation does not have a corresponding entry identified by '%s' in %s cache", key, instance.GetName())
-}
-
-// Free unlocks the cached entry and removes the reservation
-// returns:
-//  - nil: reservation removed
-//  - *fail.ErrNotAvailable: the cached entry identified by 'key' is not reserved
-//  - *fail.InconsistentError: the cached entry of the reservation should have been *cached.reservation, and is not
-=======
 	return nil, fail.InconsistentError("the reservation does not have a corresponding entry identified by '%s' in %s cached", key, instance.GetName())
 }
 
@@ -407,7 +278,6 @@ func (instance *MapStore) unsafeCommitEntry(key string, content Cacheable) (_ *E
 //  nil: reservation removed
 //  *fail.ErrNotAvailable: the cached entry identified by 'key' is not reserved
 //  *fail.InconsistentError: the cached entry of the reservation should have been *cached.reservation, and is not
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 func (instance *MapStore) Free(key string) (xerr fail.Error) {
 	if instance.isNull() {
 		return fail.InvalidInstanceError()
@@ -425,11 +295,7 @@ func (instance *MapStore) Free(key string) (xerr fail.Error) {
 // unsafeFreeEntry is the workforce of FreeEntry, without locking
 func (instance *MapStore) unsafeFreeEntry(key string) fail.Error {
 	if _, ok := instance.reserved[key]; !ok {
-<<<<<<< feature/features-enhancements
-		return fail.NotAvailableError("the entry '%s' in cache %s is not reserved", key, instance.GetName())
-=======
 		return fail.NotAvailableError("the entry '%s' in cached %s is not reserved", key, instance.GetName())
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 	}
 
 	var (
@@ -458,11 +324,7 @@ func (instance *MapStore) unsafeFreeEntry(key string) fail.Error {
 
 const reservationTimeoutForAddition = 5 * time.Second
 
-<<<<<<< feature/features-enhancements
-// Add adds a content in cache
-=======
 // Add adds a content in cached
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 func (instance *MapStore) Add(content Cacheable) (_ *Entry, ferr fail.Error) {
 	if instance == nil {
 		return nil, fail.InvalidInstanceError()
@@ -471,42 +333,24 @@ func (instance *MapStore) Add(content Cacheable) (_ *Entry, ferr fail.Error) {
 		return nil, fail.InvalidParameterCannotBeNilError("content")
 	}
 
-<<<<<<< feature/features-enhancements
-	// instance.lock.Lock()
-	// defer instance.lock.Unlock()
-
-	id := content.GetID()
-	xerr := instance.Reserve(id, reservationTimeoutForAddition)
-=======
 	instance.lock.Lock()
 	defer instance.lock.Unlock()
 
 	id := content.GetID()
 	xerr := instance.unsafeReserveEntry(id, reservationTimeoutForAddition)
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 	if xerr != nil {
 		return nil, xerr
 	}
 
 	defer func() {
 		if ferr != nil {
-<<<<<<< feature/features-enhancements
-			derr := instance.Free(id)
-			if derr != nil {
-				_ = ferr.AddConsequence(fail.Wrap(derr, "cleaning up on failure, failed to free entry '%s' in cache %s", id, instance.GetName()))
-=======
 			if derr := instance.unsafeFreeEntry(id); derr != nil {
 				_ = ferr.AddConsequence(fail.Wrap(derr, "cleaning up on failure, failed to free cached entry '%s' in cached %s", id, instance.GetName()))
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 			}
 		}
 	}()
 
-<<<<<<< feature/features-enhancements
-	cacheEntry, xerr := instance.Commit(id, content)
-=======
 	cacheEntry, xerr := instance.unsafeCommitEntry(id, content)
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 	if xerr != nil {
 		return nil, xerr
 	}
@@ -524,13 +368,8 @@ func (instance *MapStore) SignalChange(key string) {
 		return
 	}
 
-<<<<<<< feature/features-enhancements
-	instance.lock.Lock()
-	defer instance.lock.Unlock()
-=======
 	instance.lock.RLock()
 	defer instance.lock.RUnlock()
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 
 	if ce, ok := instance.cached[key]; ok {
 		ce.lock.Lock()
@@ -550,18 +389,10 @@ func (instance *MapStore) MarkAsFreed(id string) {
 		return
 	}
 
-<<<<<<< feature/features-enhancements
-	instance.lock.Lock()
-	defer instance.lock.Unlock()
-
-	ce, ok := instance.cached[id]
-	if ok {
-=======
 	instance.lock.RLock()
 	defer instance.lock.RUnlock()
 
 	if ce, ok := instance.cached[id]; ok {
->>>>>>> Refactored package lib/utils/data/cache - introduced interface Store to abstract cache storage stuff - Introduced struct SingleMemoryCache to propose (as its name suggests...) a single cache using MapStore for data storage - add function ToMapStringOfString to convert a map[interface{}]interface{} (a type that viper can return) to a map[string]string
 		ce.UnlockContent()
 	}
 }
