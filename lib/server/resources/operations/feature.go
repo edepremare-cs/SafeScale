@@ -60,23 +60,27 @@ var featureFileCache *cache.SingleMemoryCache
 
 // FeatureParameter describes a Feature parameter as defined by Feature file content
 type FeatureParameter struct {
-	name         string // contains the name of the parameter
-	description  string // contains the description of the parameter
-	hasDefault   bool   // true if the parameter has a default value
-	defaultValue string // contains default value of the parameter
+	name             string // contains the name of the parameter
+	description      string // contains the description of the parameter
+	defaultValue     string // contains default value of the parameter
+	valueControlCode string
+	hasDefault       bool // true if the parameter has a default value
+	hasValueControl  bool
 }
 
 // NewFeatureParameter initiales an new instance of FeatureParameter
-func NewFeatureParameter(name, description string, hasDefault bool, defaultValue string) (FeatureParameter, fail.Error) {
+func NewFeatureParameter(name, description string, hasDefault bool, defaultValue string, hasValueControl bool, valueControlCode string) (FeatureParameter, fail.Error) {
 	if name == "" {
 		return FeatureParameter{}, fail.InvalidParameterCannotBeEmptyStringError("name")
 	}
 
 	out := FeatureParameter{
-		name:         name,
-		description:  description,
-		hasDefault:   hasDefault,
-		defaultValue: defaultValue,
+		name:             name,
+		description:      description,
+		hasDefault:       hasDefault,
+		defaultValue:     defaultValue,
+		hasValueControl:  hasValueControl,
+		valueControlCode: valueControlCode,
 	}
 	return out, nil
 }
@@ -100,6 +104,20 @@ func (fp FeatureParameter) HasDefaultValue() bool {
 func (fp FeatureParameter) DefaultValue() (string, bool) {
 	if fp.hasDefault {
 		return fp.defaultValue, true
+	}
+
+	return "", false
+}
+
+// HasValueControl tells if the parameter has a default value
+func (fp FeatureParameter) HasValueControl() bool {
+	return fp.hasValueControl
+}
+
+// ValueControlCode returns the bash code to control the value
+func (fp FeatureParameter) ValueControlCode() (string, bool) {
+	if fp.hasValueControl {
+		return fp.valueControlCode, true
 	}
 
 	return "", false
@@ -478,11 +496,6 @@ func (ff *FeatureFile) Parse() fail.Error {
 		return xerr
 	}
 
-	xerr = ff.parseVersionControl()
-	if xerr != nil {
-		return xerr
-	}
-
 	xerr = ff.parseInstallers()
 	if xerr != nil {
 		return xerr
@@ -513,7 +526,7 @@ func (ff *FeatureFile) parseParameters() fail.Error {
 				if hasDefaultValue {
 					defaultValue = splitted[1]
 				}
-				newParam, xerr := NewFeatureParameter(name, "", hasDefaultValue, defaultValue)
+				newParam, xerr := NewFeatureParameter(name, "", hasDefaultValue, defaultValue, false, "")
 				if xerr != nil {
 					return xerr
 				}
@@ -532,31 +545,17 @@ func (ff *FeatureFile) parseParameters() fail.Error {
 
 				description, _ := casted["description"] // nolint
 				value, hasDefaultValue := casted["value"]
-				newParam, xerr := NewFeatureParameter(name, description, hasDefaultValue, value)
+				valueControlCode, hasValueControl := casted["control"]
+				newParam, xerr := NewFeatureParameter(name, description, hasDefaultValue, value, hasValueControl, valueControlCode)
 				if xerr != nil {
 					return xerr
 				}
-
 				ff.parameters[name] = newParam
 
 			default:
 				return fail.SyntaxError("unsupported content for keyword 'feature.parameters': must be a list of string or struct")
 			}
 		}
-	}
-
-	return nil
-}
-
-func (ff *FeatureFile) parseVersionControl() fail.Error {
-	rootKeyword := "feature.versionControl"
-	if ff.specs.IsSet(rootKeyword) {
-		params, ok := ff.Specs().Get(rootKeyword).(map[interface{}]interface{})
-		if !ok {
-			return fail.SyntaxError("unsupported content for keyword 'feature.versionControl': must be a list")
-		}
-
-		ff.versionControl = data.ToMapStringOfString(params)
 	}
 
 	return nil
