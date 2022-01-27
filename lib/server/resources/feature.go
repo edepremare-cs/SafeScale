@@ -43,14 +43,16 @@ type Feature interface {
 	data.Clonable
 	data.Identifiable
 
-	Add(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error)    // Add installs the feature on the target
-	Applicable(Targetable) bool                                                                     // Applicable tells if the feature is installable on the target
-	GetDisplayFilename() string                                                                     // GetDisplayFilename displays the filename of display (optionally adding '[embedded]' for embedded features)
-	GetFilename() string                                                                            // GetFilename returns the filename of the feature
-	GetRequirements() (map[string]struct{}, fail.Error)                                             // GetRequirements returns the other features needed as requirements
-	Check(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error)  // Check if feature is installed on target
-	Remove(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error) // Remove uninstalls the feature from the target
+	Add(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error)    // installs the feature on the target
+	Applyable(Targetable) bool                                                                      // tells if the feature is installable on the target
+	Check(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error)  // check if feature is installed on target
+	GetDisplayFilename() string                                                                     // displays the filename of display (optionally adding '[embedded]' for embedded features)
+	GetFilename() string                                                                            // returns the filename of the feature
+	GetRequirements() (map[string]struct{}, fail.Error)                                             // returns the other features needed as requirements
+	ListParametersWithVersionControl() []string                                                         // returns a list of parameter containing version information
+	Remove(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error) // uninstalls the feature from the target
 	ToProtocol() *protocol.FeatureResponse
+	VersionForParameter(string) (string, fail.Error)                                                // Returns the version of a controlled parameter
 }
 
 // FeatureSettings are used to tune the feature
