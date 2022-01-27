@@ -159,9 +159,10 @@ type FeatureFile struct {
 
 func newFeatureFile() *FeatureFile {
 	return &FeatureFile{
-		parameters:    map[string]FeatureParameter{},
-		observersLock: &sync.RWMutex{},
-		observers:     map[string]observer.Observer{},
+		parameters:     map[string]FeatureParameter{},
+		versionControl: map[string]string{},
+		observersLock:  &sync.RWMutex{},
+		observers:      map[string]observer.Observer{},
 	}
 }
 
@@ -550,17 +551,12 @@ func (ff *FeatureFile) parseParameters() fail.Error {
 func (ff *FeatureFile) parseVersionControl() fail.Error {
 	rootKeyword := "feature.versionControl"
 	if ff.specs.IsSet(rootKeyword) {
-		keyword := rootKeyword + ".components"
-		field := ff.specs.GetString(keyword)
-		if field == "" {
-			return fail.SyntaxError("missing or empty keyword '%s'", keyword)
+		params, ok := ff.Specs().Get(rootKeyword).(map[interface{}]interface{})
+		if !ok {
+			return fail.SyntaxError("unsupported content for keyword 'feature.versionControl': must be a list")
 		}
-		components := strings.Split(field, ",")
 
-		for _, v := range components {
-			keyword = rootKeyword + ".retrievers" + v
-			ff.versionControl[v] = ff.specs.GetString(keyword)
-		}
+		ff.versionControl = data.ToMapStringOfString(params)
 	}
 
 	return nil
