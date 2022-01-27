@@ -189,6 +189,22 @@ func ansibleForClusterFeature() *FeatureFile {
 	}
 }
 
+// ansibleForClusterFeature  ...
+func ansibleForClusterFeature() *FeatureFile {
+	name := "ansible-for-cluster"
+	filename, specs, err := loadSpecFile(name)
+	err = debug.InjectPlannedError(err)
+	if err != nil {
+		panic(err.Error())
+	}
+	return &FeatureFile{
+		displayName: name,
+		fileName:    filename,
+		embedded:    true,
+		specs:       specs,
+	}
+}
+
 // certificateAuthorityFeature from official repos ...
 func certificateAuthorityFeature() *FeatureFile {
 	name := "certificateauthority"
