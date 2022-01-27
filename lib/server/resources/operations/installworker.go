@@ -563,14 +563,14 @@ func (w *worker) Proceed(ctx context.Context, params data.Map, settings resource
 		order    []string
 	)
 	if w.method != installmethod.None {
-		pace = w.feature.specs.GetString(w.rootKey + "." + yamlPaceKeyword)
+		pace = w.feature.Specs().GetString(w.rootKey + "." + yamlPaceKeyword)
 		if pace == "" {
 			return nil, fail.SyntaxError("missing or empty key %s.%s", w.rootKey, yamlPaceKeyword)
 		}
 
 		// 'steps' describes the steps of the action
 		stepsKey = w.rootKey + "." + yamlStepsKeyword
-		steps = w.feature.specs.GetStringMap(stepsKey)
+		steps = w.feature.Specs().GetStringMap(stepsKey)
 		if len(steps) == 0 {
 			return nil, fail.InvalidRequestError("nothing to do")
 		}
@@ -619,14 +619,14 @@ func (w *worker) Proceed(ctx context.Context, params data.Map, settings resource
 		return nil, xerr
 	}
 
-	w.reduceFeatureParameters(&params)
-
-	// Checks required parameters have their values
-	xerr = checkRequiredParameters(*w.feature, params)
-	xerr = debug.InjectPlannedFail(xerr)
-	if xerr != nil {
-		return nil, xerr
-	}
+	// w.reduceFeatureParameters(&params)
+	//
+	// // Checks required parameters have their values
+	// xerr = checkRequiredParameters(*w.feature, params)
+	// xerr = debug.InjectPlannedFail(xerr)
+	// if xerr != nil {
+	// 	return nil, xerr
+	// }
 
 	// Now enumerate steps and execute each of them
 	for _, k := range order {
@@ -729,30 +729,30 @@ func (w *worker) Proceed(ctx context.Context, params data.Map, settings resource
 	return outcomes, nil
 }
 
-// reduceFeatureParameters cleans up params accordingly to the current context. Ensures that:
-// - every parameter that is not prefixed by feature name are kept
-// - every parameter that is prefixed by current feature name sees it's prefix removed
-// - every parameter that is not prefixed by current feature name is removed
-//
-// Example:
-//   if current feature is docker, and we have these params:
-//     - Version -> 21.03
-//     - kubernetes:Version -> 18.1
-//     - docker:HubLogin -> toto
-//   the call to this method will leave this:
-//     - Version -> 21.03
-//     - HubLogin -> toto
-func (w *worker) reduceFeatureParameters(params *data.Map) {
-	for k, v := range *params {
-		splitted := strings.Split(k, ":")
-		if len(splitted) > 1 {
-			if splitted[0] == w.feature.GetName() {
-				(*params)[splitted[1]] = v
-			}
-			delete(*params, k)
-		}
-	}
-}
+// // reduceFeatureParameters cleans up params accordingly to the current context. Ensures that:
+// // - every parameter that is not prefixed by feature name are kept
+// // - every parameter that is prefixed by current feature name sees it's prefix removed
+// // - every parameter that is not prefixed by current feature name is removed
+// //
+// // Example:
+// //   if current feature is docker, and we have these params:
+// //     - Version -> 21.03
+// //     - kubernetes:Version -> 18.1
+// //     - docker:HubLogin -> toto
+// //   the call to this method will leave this:
+// //     - Version -> 21.03
+// //     - HubLogin -> toto
+// func (w *worker) reduceFeatureParameters(params *data.Map) {
+// 	for k, v := range *params {
+// 		splitted := strings.Split(k, ":")
+// 		if len(splitted) > 1 {
+// 			if splitted[0] == w.feature.GetName() {
+// 				(*params)[splitted[1]] = v
+// 			}
+// 			delete(*params, k)
+// 		}
+// 	}
+// }
 
 type taskLaunchStepParameters struct {
 	stepName  string
@@ -1005,8 +1005,8 @@ func (w *worker) validateContextForCluster() fail.Error {
 	}
 
 	const yamlKey = "feature.suitableFor.cluster"
-	if w.feature.specs.IsSet(yamlKey) {
-		yamlFlavors := strings.Split(w.feature.specs.GetString(yamlKey), ",")
+	if w.feature.Specs().IsSet(yamlKey) {
+		yamlFlavors := strings.Split(w.feature.Specs().GetString(yamlKey), ",")
 		for _, k := range yamlFlavors {
 			k = strings.ToLower(k)
 			e, xerr := clusterflavor.Parse(k)
@@ -1027,8 +1027,8 @@ func (w *worker) validateContextForHost(settings resources.FeatureSettings) fail
 
 	ok := false
 	const yamlKey = "feature.suitableFor.host"
-	if w.feature.specs.IsSet(yamlKey) {
-		value := strings.ToLower(w.feature.specs.GetString(yamlKey))
+	if w.feature.Specs().IsSet(yamlKey) {
+		value := strings.ToLower(w.feature.Specs().GetString(yamlKey))
 		ok = value == "ok" || value == "yes" || value == "true" || value == "1"
 	}
 	if ok {
@@ -1045,11 +1045,11 @@ func (w *worker) validateClusterSizing(ctx context.Context) (xerr fail.Error) {
 		return xerr
 	}
 	yamlKey := "feature.requirements.clusterSizing." + strings.ToLower(clusterFlavor.String())
-	if !w.feature.specs.IsSet(yamlKey) {
+	if !w.feature.Specs().IsSet(yamlKey) {
 		return nil
 	}
 
-	sizing := w.feature.specs.GetStringMap(yamlKey)
+	sizing := w.feature.Specs().GetStringMap(yamlKey)
 	if anon, ok := sizing["masters"]; ok {
 		request, ok := anon.(string)
 		if !ok {
@@ -1114,7 +1114,7 @@ func (w *worker) setReverseProxy(ctx context.Context) (ferr fail.Error) {
 	}
 
 	const yamlKey = "feature.proxy.rules"
-	rules, ok := w.feature.specs.Get(yamlKey).([]interface{})
+	rules, ok := w.feature.Specs().Get(yamlKey).([]interface{})
 	if !ok || len(rules) == 0 {
 		return nil
 	}
@@ -1536,11 +1536,11 @@ func (w *worker) setNetworkingSecurity(ctx context.Context) (xerr fail.Error) {
 	}
 
 	const yamlKey = "feature.security.networking"
-	if ok := w.feature.specs.IsSet(yamlKey); !ok {
+	if ok := w.feature.Specs().IsSet(yamlKey); !ok {
 		return nil
 	}
 
-	rules, ok := w.feature.specs.Get(yamlKey).([]interface{})
+	rules, ok := w.feature.Specs().Get(yamlKey).([]interface{})
 	if !ok || len(rules) == 0 {
 		return nil
 	}

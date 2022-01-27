@@ -23,10 +23,18 @@ feature:
         cluster: all
 
     parameters:
-        - Username
-        - Password
-        - GuacamolePort=63011
-        - TomcatPort=9009
+        - name: Username
+          description: |-
+              Username to use to authenticate Remote Desktop (default: none)
+        - name: Password
+          description: |-
+              Password to use to authenticate Remote Desktop (default: none)
+        - name: GuacamolePort
+          value: 63011
+          description: Port guacamole must use
+        - name: TomcatPort
+          value: 9009
+          description: Port tomcat must use
 
     install:
         bash:
