@@ -174,14 +174,14 @@ func ansibleFeature() *FeatureFile {
 }
 
 // ansibleForClusterFeature  ...
-func ansibleForClusterFeature() *Feature {
+func ansibleForClusterFeature() *FeatureFile {
 	name := "ansible-for-cluster"
 	filename, specs, err := loadSpecFile(name)
 	err = debug.InjectPlannedError(err)
 	if err != nil {
 		panic(err.Error())
 	}
-	return &Feature{
+	return &FeatureFile{
 		displayName: name,
 		fileName:    filename,
 		embedded:    true,
