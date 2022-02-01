@@ -16,7 +16,7 @@
 
 package cache
 
-//go:generate minimock -o ../mocks/mock_clonable.go -i github.com/CS-SI/SafeScale/lib/utils/data/cached.cached
+//go:generate minimock -o ../mocks/mock_clonable.go -i github.com/CS-SI/SafeScale/lib/utils/data/cached.MapStore
 
 import (
 	"fmt"
@@ -34,9 +34,9 @@ import (
 
 type MapStore struct {
 	name     atomic.Value
-	lock     sync.RWMutex
+	lock     sync.Mutex
 	cached   map[string]*Entry
-	reserved map[string]*Entry
+	reserved map[string]*reservation
 }
 
 // NewMapStore creates a new cache storage based on map (thread-safe)
@@ -47,7 +47,7 @@ func NewMapStore(name string) (Store, fail.Error) {
 
 	instance := &MapStore{
 		cached:   map[string]*Entry{},
-		reserved: map[string]*Entry{},
+		reserved: map[string]*reservation{},
 	}
 	instance.name.Store(name)
 	return instance, nil
@@ -76,59 +76,36 @@ func (instance *MapStore) Entry(key string) (*Entry, fail.Error) {
 		return nil, fail.InvalidParameterCannotBeEmptyStringError("id")
 	}
 
-	instance.lock.RLock()
-	defer instance.lock.RUnlock()
+	instance.lock.Lock()
+	defer instance.lock.Unlock()
 
-	// If key is reserved, we may have to wait reservation committed or freed to determine if
-	if _, ok := instance.reserved[key]; ok {
-		ce, ok := instance.cached[key]
-		if !ok {
-			return nil, fail.InconsistentError("reserved entry '%s' in %s cached does not have a corresponding cached entry", key, instance.GetName())
-		}
+	// If key is reserved, we may have to wait reservation committed, freed or timed out
+	reservation, ok := instance.reserved[key]
+	if ok {
+		xerr := reservation.WaitReleased()
+		if xerr != nil {
+			switch xerr.(type) {
+			case *fail.ErrDuplicate:
+				// We want the cache entry, so this error is attended, continue
 
-		reservation, ok := ce.Content().(*reservation)
-		if !ok {
-			// May have transitioned from reservation content to real content, first check that there is no more reservation...
-			if _, ok := instance.reserved[key]; ok {
-				return nil, fail.InconsistentError("'*cached.reservation' expected, '%s' provided", reflect.TypeOf(ce.Content()).String())
-			}
-		} else {
-			waitFor := reservation.timeout - time.Since(reservation.created)
-			if waitFor < 0 {
-				waitFor = 0
-			}
-			select {
-			case <-reservation.freed():
-				return nil, fail.NotFoundError("failed to find entry with key '%s' in %s cached", key, instance.GetName())
-
-			case <-reservation.committed():
-				// acknowledge commit, and continue
-
-			case <-time.After(waitFor):
-				// reservation expired, clean up
-				xerr := instance.reservationExpired(key)
-				if xerr != nil {
-					return nil, xerr
+			case *fail.ErrTimeout:
+				derr := instance.unsafeFreeEntry(key)
+				if derr != nil {
+					_ = xerr.AddConsequence(derr)
 				}
+				return nil, fail.NotFoundError("failed to find entry '%s' in %s cache: %v", key, instance.GetName(), xerr)
 
-				return nil, fail.Wrap(fail.TimeoutError(nil, reservation.timeout, "reservation for entry with key '%s' in %s cached has expired", key, instance.GetName()), "failed to find entry '%s' in %s cached", key, instance.GetName())
+			default:
+				return nil, xerr
 			}
 		}
 	}
 
-	// If key is found in cached, returns corresponding *cached.Entry
 	if ce, ok := instance.cached[key]; ok {
 		return ce, nil
 	}
 
-	return nil, fail.NotFoundError("failed to find entry with key '%s' in %s cached", key, instance.GetName())
-}
-
-func (instance *MapStore) reservationExpired(key string) fail.Error {
-	instance.lock.RUnlock() // nolint
-	defer instance.lock.RLock()
-
-	return instance.Free(key)
+	return nil, fail.NotFoundError("failed to find entry with key '%s' in %s cache", key, instance.GetName())
 }
 
 /*
@@ -150,21 +127,43 @@ func (instance *MapStore) Reserve(key string, timeout time.Duration) (xerr fail.
 		return fail.InvalidParameterError("timeout", "cannot be 0")
 	}
 
+	// If key is already reserved, we may have to wait reservation committed or freed to determine if we can effectively reserve it
 	instance.lock.Lock()
 	defer instance.lock.Unlock()
 
-	return instance.unsafeReserveEntry(key, timeout)
-}
-
-// unsafeReserveEntry is the workforce of ReserveEntry, without locking
-func (instance *MapStore) unsafeReserveEntry(key string, timeout time.Duration) (xerr fail.Error) {
 	if _, ok := instance.reserved[key]; ok {
-		xerr = fail.NotAvailableError("the entry '%s' of %s cache is already reserved", key, instance.GetName())
-		logrus.Errorf(callstack.DecorateWith("", xerr.Error(), "", 0))
-		return xerr
-	}
-	if _, ok := instance.cached[key]; ok {
-		return fail.DuplicateError(callstack.DecorateWith("", "", fmt.Sprintf("there is already an entry with key '%s' in the %s cached", key, instance.GetName()), 0))
+		ce, ok := instance.cached[key]
+		if !ok {
+			return fail.InconsistentError("reserved entry '%s' in %s cache does not have a corresponding cached entry", key, instance.GetName())
+		}
+
+		reservation, ok := ce.Content().(*reservation)
+		if !ok {
+			// May have transitioned from reservation content to real content, first check that there is no more reservation...
+			if _, ok := instance.reserved[key]; ok {
+				xerr = fail.NotAvailableError("the entry '%s' of %s cache is already reserved", key, instance.GetName())
+				logrus.Errorf(callstack.DecorateWith("", xerr.Error(), "", 0))
+				return xerr
+			}
+		} else {
+			xerr := reservation.WaitReleased()
+			if xerr != nil {
+				switch xerr.(type) {
+				case *fail.ErrDuplicate:
+					return xerr
+
+				case *fail.ErrTimeout:
+					derr := instance.unsafeFreeEntry(key)
+					if derr != nil {
+						_ = xerr.AddConsequence(derr)
+					}
+					// continue to reserve entry
+
+				default:
+					return xerr
+				}
+			}
+		}
 	}
 
 	content := newReservation(key)
@@ -172,7 +171,7 @@ func (instance *MapStore) unsafeReserveEntry(key string, timeout time.Duration) 
 	ce := newEntry(content)
 	pce := &ce
 	instance.cached[key] = pce
-	instance.reserved[key] = pce
+	instance.reserved[key] = content
 	return nil
 }
 
@@ -199,40 +198,33 @@ func (instance *MapStore) Commit(key string, content Cacheable) (ce *Entry, xerr
 	instance.lock.Lock()
 	defer instance.lock.Unlock()
 
-	return instance.unsafeCommitEntry(key, content)
-}
-
-// unsafeCommitEntry is the workforce of CommitEntry, without locking
-// The key retained at the end in the MapCacheStore may be different to the one passed in parameter (and used previously in ReserveEntry), because content.ID() has to be the final key.
-func (instance *MapStore) unsafeCommitEntry(key string, content Cacheable) (_ *Entry, xerr fail.Error) {
 	if _, ok := instance.reserved[key]; !ok {
-		return nil, fail.NotFoundError("the cached entry '%s' is not reserved (may have expired)", key)
+		// return nil, fail.NotFoundError("the cached entry '%s' is not reserved (may have expired)", key)
+		return nil, fail.NotFoundError(callstack.DecorateWith("", fmt.Sprintf("the cache entry '%s' is not reserved (may have expired)", key), "", 0))
 	}
 
 	// content may bring new key, based on content.ID(), different from the key reserved; we have to check if this new key has not been reserved by someone else...
-	var reservedEntry *Entry
+	var reservedEntry *reservation
 	newContentKey := content.GetID()
 	if newContentKey != key {
 		var ok bool
-		if reservedEntry, ok = instance.reserved[newContentKey]; ok {
-			return nil, fail.NotAvailableError("the cached entry '%s' in %s cached, corresponding to the new ID of the content, is reserved; content cannot be committed", newContentKey, instance.name)
+		reservedEntry, ok = instance.reserved[newContentKey]
+		if ok {
+			return nil, fail.NotAvailableError("the cached entry '%s' in %s cache, corresponding to the new ID of the content, is reserved; content cannot be committed", newContentKey, instance.name)
 		}
 		if _, ok := instance.cached[content.GetID()]; ok {
-			return nil, fail.DuplicateError("the cached entry '%s' in %s cached, corresponding to the new ID of the content, is already used; content cannot be committed", newContentKey, instance.name)
+			return nil, fail.DuplicateError("the cached entry '%s' in %s cache, corresponding to the new ID of the content, is already used; content cannot be committed", newContentKey, instance.name)
 		}
 	}
 	if reservedEntry != nil {
-		reserved, ok := reservedEntry.Content().(*reservation)
-		if ok {
-			if reserved.timeout < time.Since(reserved.created) {
-				// reservation has expired...
-				cleanErr := fail.TimeoutError(nil, reserved.timeout, "reservation of key '%s' in %s cached has expired")
-				derr := instance.unsafeFreeEntry(key)
-				if derr != nil {
-					_ = cleanErr.AddConsequence(derr)
-				}
-				return nil, cleanErr
+		if reservedEntry.timeout < time.Since(reservedEntry.created) {
+			// reservation has expired...
+			cleanErr := fail.TimeoutError(nil, reservedEntry.timeout, "reservation of key '%s' in %s cache has expired")
+			derr := instance.unsafeFreeEntry(key)
+			if derr != nil {
+				_ = cleanErr.AddConsequence(derr)
 			}
+			return nil, cleanErr
 		}
 	}
 
@@ -270,14 +262,14 @@ func (instance *MapStore) unsafeCommitEntry(key string, content Cacheable) (_ *E
 		return cacheEntry, nil
 	}
 
-	return nil, fail.InconsistentError("the reservation does not have a corresponding entry identified by '%s' in %s cached", key, instance.GetName())
+	return nil, fail.InconsistentError("the reservation does not have a corresponding entry identified by '%s' in %s cache", key, instance.GetName())
 }
 
 // Free unlocks the cached entry and removes the reservation
-// return:
-//  nil: reservation removed
-//  *fail.ErrNotAvailable: the cached entry identified by 'key' is not reserved
-//  *fail.InconsistentError: the cached entry of the reservation should have been *cached.reservation, and is not
+// returns:
+//  - nil: reservation removed
+//  - *fail.ErrNotAvailable: the cached entry identified by 'key' is not reserved
+//  - *fail.InconsistentError: the cached entry of the reservation should have been *cached.reservation, and is not
 func (instance *MapStore) Free(key string) (xerr fail.Error) {
 	if instance.isNull() {
 		return fail.InvalidInstanceError()
@@ -295,7 +287,7 @@ func (instance *MapStore) Free(key string) (xerr fail.Error) {
 // unsafeFreeEntry is the workforce of FreeEntry, without locking
 func (instance *MapStore) unsafeFreeEntry(key string) fail.Error {
 	if _, ok := instance.reserved[key]; !ok {
-		return fail.NotAvailableError("the entry '%s' in cached %s is not reserved", key, instance.GetName())
+		return fail.NotAvailableError("the entry '%s' in cache %s is not reserved", key, instance.GetName())
 	}
 
 	var (
@@ -324,7 +316,7 @@ func (instance *MapStore) unsafeFreeEntry(key string) fail.Error {
 
 const reservationTimeoutForAddition = 5 * time.Second
 
-// Add adds a content in cached
+// Add adds a content in cache
 func (instance *MapStore) Add(content Cacheable) (_ *Entry, ferr fail.Error) {
 	if instance == nil {
 		return nil, fail.InvalidInstanceError()
@@ -333,24 +325,25 @@ func (instance *MapStore) Add(content Cacheable) (_ *Entry, ferr fail.Error) {
 		return nil, fail.InvalidParameterCannotBeNilError("content")
 	}
 
-	instance.lock.Lock()
-	defer instance.lock.Unlock()
+	// instance.lock.Lock()
+	// defer instance.lock.Unlock()
 
 	id := content.GetID()
-	xerr := instance.unsafeReserveEntry(id, reservationTimeoutForAddition)
+	xerr := instance.Reserve(id, reservationTimeoutForAddition)
 	if xerr != nil {
 		return nil, xerr
 	}
 
 	defer func() {
 		if ferr != nil {
-			if derr := instance.unsafeFreeEntry(id); derr != nil {
-				_ = ferr.AddConsequence(fail.Wrap(derr, "cleaning up on failure, failed to free cached entry '%s' in cached %s", id, instance.GetName()))
+			derr := instance.Free(id)
+			if derr != nil {
+				_ = ferr.AddConsequence(fail.Wrap(derr, "cleaning up on failure, failed to free entry '%s' in cache %s", id, instance.GetName()))
 			}
 		}
 	}()
 
-	cacheEntry, xerr := instance.unsafeCommitEntry(id, content)
+	cacheEntry, xerr := instance.Commit(id, content)
 	if xerr != nil {
 		return nil, xerr
 	}
@@ -368,8 +361,8 @@ func (instance *MapStore) SignalChange(key string) {
 		return
 	}
 
-	instance.lock.RLock()
-	defer instance.lock.RUnlock()
+	instance.lock.Lock()
+	defer instance.lock.Unlock()
 
 	if ce, ok := instance.cached[key]; ok {
 		ce.lock.Lock()
@@ -389,10 +382,11 @@ func (instance *MapStore) MarkAsFreed(id string) {
 		return
 	}
 
-	instance.lock.RLock()
-	defer instance.lock.RUnlock()
+	instance.lock.Lock()
+	defer instance.lock.Unlock()
 
-	if ce, ok := instance.cached[id]; ok {
+	ce, ok := instance.cached[id]
+	if ok {
 		ce.UnlockContent()
 	}
 }

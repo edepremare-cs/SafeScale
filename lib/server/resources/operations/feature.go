@@ -59,7 +59,7 @@ type FeatureParameter struct {
 	description      string // contains the description of the parameter
 	defaultValue     string // contains default value of the parameter
 	valueControlCode string
-	hasDefault       bool // true if the parameter has a default value
+	hasDefaultValue  bool // true if the parameter has a default value
 	hasValueControl  bool
 }
 
@@ -72,7 +72,7 @@ func NewFeatureParameter(name, description string, hasDefault bool, defaultValue
 	out := FeatureParameter{
 		name:             name,
 		description:      description,
-		hasDefault:       hasDefault,
+		hasDefaultValue:  hasDefault,
 		defaultValue:     defaultValue,
 		hasValueControl:  hasValueControl,
 		valueControlCode: valueControlCode,
@@ -92,19 +92,19 @@ func (fp FeatureParameter) Description() string {
 
 // HasDefaultValue tells if the parameter has a default value
 func (fp FeatureParameter) HasDefaultValue() bool {
-	return fp.hasDefault
+	return fp.hasDefaultValue
 }
 
 // DefaultValue returns the default value of the parameter
 func (fp FeatureParameter) DefaultValue() (string, bool) {
-	if fp.hasDefault {
+	if fp.hasDefaultValue {
 		return fp.defaultValue, true
 	}
 
 	return "", false
 }
 
-// HasValueControl tells if the parameter has a default value
+// HasValueControl tells if the parameter has a value control
 func (fp FeatureParameter) HasValueControl() bool {
 	return fp.hasValueControl
 }
@@ -369,9 +369,9 @@ func LoadFeatureFile(svc iaas.Service, name string, embeddedOnly bool) (_ *Featu
 	)
 	ce, xerr := featureFileCache.Get(name, cacheOptions...)
 	if xerr != nil {
+		logrus.Error(callstack.DecorateWith("", xerr.Error(), "", 0))
 		switch xerr.(type) {
 		case *fail.ErrNotFound:
-			debug.IgnoreError(xerr)
 			return nil, fail.NotFoundError("failed to find Feature '%s'", name)
 		default:
 			return nil, xerr
@@ -406,7 +406,7 @@ func onFeatureFileCacheMiss(_ iaas.Service, name string, embeddedOnly bool) (cac
 			return nil, xerr
 		}
 
-		logrus.Tracef("Loaded feature '%s' (%s)", newInstance.DisplayFilename(), newInstance.Filename())
+		logrus.Tracef("Loaded Feature '%s' (%s)", newInstance.DisplayFilename(), newInstance.Filename())
 	} else {
 		v := viper.New()
 		v.AddConfigPath(".")
@@ -443,7 +443,7 @@ func onFeatureFileCacheMiss(_ iaas.Service, name string, embeddedOnly bool) (cac
 			}
 		}
 
-		logrus.Tracef("Loaded feature '%s' (%s)", newInstance.DisplayFilename(), newInstance.Filename())
+		logrus.Tracef("Loaded Feature '%s' (%s)", newInstance.DisplayFilename(), newInstance.Filename())
 
 		// if we can log the sha256 of the feature, do it
 		filename := v.ConfigFileUsed()
@@ -453,7 +453,7 @@ func onFeatureFileCacheMiss(_ iaas.Service, name string, embeddedOnly bool) (cac
 				return nil, fail.ConvertError(err)
 			}
 
-			logrus.Tracef("Loaded feature '%s' SHA256:%s", name, getSHA256Hash(string(content)))
+			logrus.Tracef("Loaded Feature '%s' SHA256:%s", name, getSHA256Hash(string(content)))
 		}
 	}
 

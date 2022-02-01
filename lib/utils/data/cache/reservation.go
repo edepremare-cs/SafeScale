@@ -110,3 +110,26 @@ func (rc reservation) freed() <-chan struct{} {
 func (rc reservation) committed() <-chan struct{} {
 	return rc.committedCh
 }
+
+// WaitReleased waits until the reservation is released
+// Returns:
+//  - nil: the reservation is released and can be used again
+//  - *fail.ErrTimeout: the reservation has timed out and can be used again
+//  - *fail.ErrDuplicate: the reservation is released but a cache entry exist, so can not be reused
+func (rc reservation) WaitReleased() fail.Error {
+	// If key is reserved, we may have to wait reservation committed or freed to determine if
+	waitFor := rc.timeout - time.Since(rc.created)
+	if waitFor < 0 {
+		waitFor = 0
+	}
+	select {
+	case <-rc.freed():
+		return nil
+
+	case <-rc.committed():
+		return fail.DuplicateError("reservation for entry with key '%s' in %s cache cannot be reused because a cache entry exists", rc.key, rc.GetName())
+
+	case <-time.After(waitFor):
+		return fail.TimeoutError(nil, rc.timeout, "reservation for entry with key '%s' in %s cache has expired", rc.key, rc.GetName())
+	}
+}

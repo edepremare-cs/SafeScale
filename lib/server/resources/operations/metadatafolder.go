@@ -63,10 +63,12 @@ func NewMetadataFolder(svc iaas.Service, path string) (MetadataFolder, fail.Erro
 	cryptKey, xerr := svc.GetMetadataKey()
 	xerr = debug.InjectPlannedFail(xerr)
 	if xerr != nil {
-		if _, ok := xerr.(*fail.ErrNotFound); !ok || xerr.IsNull() {
+		switch xerr.(type) {
+		case *fail.ErrNotFound:
+			debug.IgnoreError(xerr)
+		default:
 			return MetadataFolder{}, xerr
 		}
-		debug.IgnoreError(xerr)
 	} else {
 		f.crypt = cryptKey != nil && len(cryptKey) > 0
 		if f.crypt {

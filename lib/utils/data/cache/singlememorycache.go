@@ -1,5 +1,7 @@
 package cache
 
+//go:generate minimock -o ../mocks/mock_cacheable.go -i github.com/CS-SI/SafeScale/lib/utils/data/cache.SingleMemoryCache
+
 import (
 	"sync"
 	"time"
@@ -69,7 +71,7 @@ func (instance *SingleMemoryCache) isNull() bool {
 }
 
 // Get returns the content associated with key
-func (instance *SingleMemoryCache) Get(key string, options ...data.ImmutableKeyValue) (ce *Entry, xerr fail.Error) {
+func (instance *SingleMemoryCache) Get(key string, options ...data.ImmutableKeyValue) (ce *Entry, ferr fail.Error) {
 	if instance == nil || instance.isNull() {
 		return nil, fail.InvalidInstanceError()
 	}
@@ -77,7 +79,10 @@ func (instance *SingleMemoryCache) Get(key string, options ...data.ImmutableKeyV
 		return nil, fail.InvalidParameterCannotBeEmptyStringError("key")
 	}
 
-	ce, found := instance.loadEntry(key)
+	instance.lock.Lock()
+	defer instance.lock.Unlock()
+
+	ce, found := instance.unsafeLoadEntry(key)
 	if found {
 		return ce, nil
 	}
@@ -112,17 +117,16 @@ func (instance *SingleMemoryCache) Get(key string, options ...data.ImmutableKeyV
 				onMissTimeout = temporal.DefaultDelay()
 			}
 
-			xerr := instance.ReserveEntry(key, onMissTimeout)
+			xerr := instance.unsafeReserveEntry(key, onMissTimeout)
 			if xerr != nil {
-				switch xerr.(type) {
+				switch castedErr := xerr.(type) {
 				case *fail.ErrDuplicate:
-					// Search in the cache by ID
-					ce, xerr = instance.store.Entry(key)
-					if xerr != nil {
-						return nil, xerr
+					ce, found = instance.unsafeLoadEntry(key)
+					if found {
+						return ce, nil
 					}
 
-					return ce, nil
+					return nil, castedErr
 
 				default:
 					return nil, xerr
@@ -130,15 +134,24 @@ func (instance *SingleMemoryCache) Get(key string, options ...data.ImmutableKeyV
 			}
 
 			var content Cacheable
-			if content, xerr = onMissFunc(); xerr == nil {
-				ce, xerr = instance.CommitEntry(key, content)
+			content, xerr = onMissFunc()
+			if xerr == nil {
+				ce, xerr = instance.unsafeCommitEntry(key, content)
 			}
 			if xerr != nil {
-				if derr := instance.FreeEntry(key); derr != nil {
-					_ = xerr.AddConsequence(fail.Wrap(derr, "cleaning up on failure, failed to free cache entry with key '%s'", key))
+				switch xerr.(type) {
+				case *fail.ErrNotFound:
+					return nil, xerr
+
+				default:
+					derr := instance.unsafeFreeEntry(key)
+					if derr != nil {
+						_ = xerr.AddConsequence(fail.Wrap(derr, "cleaning up on failure, failed to free cache entry with key '%s'", key))
+					}
+					return nil, xerr
 				}
-				return nil, xerr
 			}
+
 			return ce, nil
 		}
 	}
@@ -146,14 +159,11 @@ func (instance *SingleMemoryCache) Get(key string, options ...data.ImmutableKeyV
 	return nil, fail.NotFoundError("failed to find cache entry for key '%s', and does not know how to fill the miss", key)
 }
 
-// loadEntry returns the entry corresponding to the key if it exists
+// unsafeLoadEntry returns the entry corresponding to the key if it exists
 // returns:
 // - *cache.Entry, true: if key is found
 // - nil, false: if key is not found
-func (instance *SingleMemoryCache) loadEntry(key string) (*Entry, bool) {
-	instance.lock.Lock()
-	defer instance.lock.Unlock()
-
+func (instance *SingleMemoryCache) unsafeLoadEntry(key string) (*Entry, bool) {
 	ce, xerr := instance.store.Entry(key)
 	if xerr != nil {
 		return nil, false
@@ -178,6 +188,21 @@ func (instance *SingleMemoryCache) ReserveEntry(key string, timeout time.Duratio
 	instance.lock.Lock()
 	defer instance.lock.Unlock()
 
+	return instance.unsafeReserveEntry(key, timeout)
+}
+
+// unsafeReserveEntry sets a cache entry to reserve the key and returns the Entry associated
+func (instance *SingleMemoryCache) unsafeReserveEntry(key string, timeout time.Duration) fail.Error {
+	if instance == nil || instance.isNull() {
+		return fail.InvalidInstanceError()
+	}
+	if key == "" {
+		return fail.InvalidParameterCannotBeEmptyStringError("key")
+	}
+	if timeout <= 0 {
+		return fail.InvalidParameterError("timeout", "cannot be less or equal to 0")
+	}
+
 	return instance.store.Reserve(key, timeout)
 }
 
@@ -192,6 +217,18 @@ func (instance *SingleMemoryCache) CommitEntry(key string, content Cacheable) (c
 
 	instance.lock.Lock()
 	defer instance.lock.Unlock()
+
+	return instance.unsafeCommitEntry(key, content)
+}
+
+// unsafeCommitEntry confirms the entry in the cache with the content passed as parameter
+func (instance *SingleMemoryCache) unsafeCommitEntry(key string, content Cacheable) (ce *Entry, xerr fail.Error) {
+	if instance == nil || instance.isNull() {
+		return nil, fail.InvalidInstanceError()
+	}
+	if key == "" {
+		return nil, fail.InvalidParameterCannotBeEmptyStringError("key")
+	}
 
 	ce, xerr = instance.store.Commit(key, content)
 	if xerr != nil {
@@ -212,6 +249,18 @@ func (instance *SingleMemoryCache) FreeEntry(key string) fail.Error {
 
 	instance.lock.Lock()
 	defer instance.lock.Unlock()
+
+	return instance.unsafeFreeEntry(key)
+}
+
+// unsafeFreeEntry removes the reservation in cache
+func (instance *SingleMemoryCache) unsafeFreeEntry(key string) fail.Error {
+	if instance == nil || instance.isNull() {
+		return fail.InvalidInstanceError()
+	}
+	if key == "" {
+		return fail.InvalidParameterCannotBeEmptyStringError("key")
+	}
 
 	return instance.store.Free(key)
 }
