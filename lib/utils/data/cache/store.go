@@ -16,7 +16,7 @@
 
 package cache
 
-//go:generate minimock -o ../mocks/mock_clonable.go -i github.com/CS-SI/SafeScale/lib/utils/data/cache.Cache
+//go:generate minimock -o ../mocks/mock_clonable.go -i github.com/CS-SI/SafeScale/lib/utils/data/cache.Store
 
 import (
 	"time"
@@ -33,5 +33,5 @@ type Store interface {
 	Reserve(key string, timeout time.Duration) fail.Error      // reserve an entry in the cached
 	Commit(key string, content Cacheable) (*Entry, fail.Error) // Commit fills a previously reserved entry by 'key' with 'content'
 	Free(key string) fail.Error                                // frees a cached entry (removing the reservation from cached)
-	Add(content Cacheable) (*Entry, fail.Error)                // adds a content in cached (doing Reserve+Commit in a whole with content ID as key)
+	Add(content Cacheable) (*Entry, fail.Error)                // adds a content in cache (doing Reserve+Commit in a whole with content ID as key)
 }
