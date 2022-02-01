@@ -29,7 +29,7 @@ import (
 )
 
 func TestLockContent(t *testing.T) {
-	content := newReservation("content" /*, time.Minute*/)
+	content := newReservation("content")
 	cacheEntry := newEntry(content)
 
 	assert.EqualValues(t, uint(0), cacheEntry.LockCount())
@@ -48,7 +48,7 @@ func TestLockContent(t *testing.T) {
 }
 
 func TestParallelLockContent(t *testing.T) {
-	content := newReservation("content" /*, time.Minute*/)
+	content := newReservation("content")
 	cacheEntry := newEntry(content)
 
 	task1, _ := concurrency.NewUnbreakableTask()
@@ -122,7 +122,7 @@ func TestDeadlock(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		content := newReservation("content" /*, time.Minute*/)
+		content := newReservation("content")
 
 		nukaCola, _ := NewMapStore("nuka")
 		xerr := nukaCola.Reserve("What", 2*time.Second)
@@ -132,7 +132,7 @@ func TestDeadlock(t *testing.T) {
 			return
 		}
 
-		// between reserve and commit, someone with a reference to our cached just checks its content
+		// between reserve and commit, someone with a reference to our cache just checks its content
 		xerr = makeDeadlockHappy(nukaCola)
 		t.Log(xerr)
 
@@ -162,7 +162,7 @@ func TestReserveCommitGet(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		content := newReservation("content" /*, time.Minute*/)
+		content := newReservation("content")
 
 		nukaCola, err := NewMapStore("nuka")
 		if err != nil {
@@ -210,7 +210,7 @@ func TestReserveCommitGet(t *testing.T) {
 
 func TestMultipleReserveCommitGet(t *testing.T) {
 	wg := sync.WaitGroup{}
-	content := newReservation("content" /*, time.Minute*/)
+	content := newReservation("content")
 	nukaCola, err := NewMapStore("nuka")
 	require.Nil(t, err)
 
@@ -268,7 +268,7 @@ func TestSurprisingBehaviour(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		content := newReservation("content" /*, time.Minute*/)
+		content := newReservation("content")
 
 		nukaCola, err := NewMapStore("nuka")
 		if err != nil {
@@ -325,7 +325,7 @@ func TestSurprisingBehaviour(t *testing.T) {
 }
 
 func TestDeadlockAddingEntry(t *testing.T) {
-	content := newReservation("content" /*, time.Minute*/)
+	content := newReservation("content")
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -355,7 +355,7 @@ func TestDeadlockAddingEntry(t *testing.T) {
 }
 
 func TestSignalChangeEntry(t *testing.T) {
-	content := newReservation("content" /*, time.Minute*/)
+	content := newReservation("content")
 	_ = content
 
 	wg := sync.WaitGroup{}
@@ -401,9 +401,9 @@ func TestFreeWhenConflictingReservationAlreadyThere(t *testing.T) {
 		t.FailNow()
 	}
 
-	previous := newReservation("previous" /*, time.Minute*/)
+	previous := newReservation("previous")
 	_ = previous
-	content := newReservation("cola" /*, time.Minute*/)
+	content := newReservation("cola")
 	_ = content
 
 	wg := sync.WaitGroup{}
