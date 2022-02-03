@@ -17,6 +17,7 @@ require (
 	github.com/denisbrodbeck/machineid v1.0.1
 	github.com/farmergreg/rfsnotify v0.0.0-20200716145600-b37be6e4177f
 	github.com/felixge/fgprof v0.9.2
+	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
 	github.com/gojuno/minimock/v3 v3.0.10
 	github.com/golang/protobuf v1.5.2
@@ -37,7 +38,6 @@ require (
 	github.com/outscale/osc-sdk-go/osc v0.0.0-20200515123036-c82ce4912c6b
 	github.com/ovh/go-ovh v0.0.0-20181109152953-ba5adb4cf014
 	github.com/pengux/check v0.0.0-20150612073650-53861b30913d
-	github.com/quasilyte/go-ruleguard/dsl v0.3.10 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/sanity-io/litter v1.5.2
 	github.com/satori/go.uuid v1.2.1-0.20181028125025-b2ce2384e17b
