@@ -19,15 +19,18 @@ package operations
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
 
-	"github.com/CS-SI/SafeScale/lib/utils/data/observer"
-	"github.com/CS-SI/SafeScale/lib/utils/debug/callstack"
+	"github.com/farmergreg/rfsnotify"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"golang.org/x/sys/unix"
+	"gopkg.in/fsnotify.v1"
 
 	"github.com/CS-SI/SafeScale/lib/protocol"
 	"github.com/CS-SI/SafeScale/lib/server/iaas"
@@ -51,7 +54,23 @@ const (
 	featureFileKind = "featurefile"
 )
 
-var featureFileCache *cache.SingleMemoryCache
+type featureFileSingleton struct {
+	cache *cache.SingleMemoryCache
+}
+
+var (
+	featureFileController featureFileSingleton
+	featureFileFolders    = []string{
+		"$HOME/.safescale/features",
+		"$HOME/.config/safescale/features",
+		"/etc/safescale/features",
+	}
+	cwdFeatureFileFolders = []string{
+		".",
+		"./features",
+		"./.safescale/features",
+	}
+)
 
 // FeatureParameter describes a Feature parameter as defined by Feature file content
 type FeatureParameter struct {
@@ -367,7 +386,7 @@ func LoadFeatureFile(svc iaas.Service, name string, embeddedOnly bool) (_ *Featu
 		func() (cache.Cacheable, fail.Error) { return onFeatureFileCacheMiss(svc, name, embeddedOnly) },
 		svc.Timings().MetadataTimeout(),
 	)
-	ce, xerr := featureFileCache.Get(name, cacheOptions...)
+	ce, xerr := featureFileController.cache.Get(name, cacheOptions...)
 	if xerr != nil {
 		logrus.Error(callstack.DecorateWith("", xerr.Error(), "", 0))
 		switch xerr.(type) {
@@ -409,14 +428,8 @@ func onFeatureFileCacheMiss(_ iaas.Service, name string, embeddedOnly bool) (cac
 		logrus.Tracef("Loaded Feature '%s' (%s)", newInstance.DisplayFilename(), newInstance.Filename())
 	} else {
 		v := viper.New()
-		v.AddConfigPath(".")
-		v.AddConfigPath("./features")
-		v.AddConfigPath("./.safescale/features")
-		v.AddConfigPath("$HOME/.safescale/features")
-		v.AddConfigPath("$HOME/.config/safescale/features")
-		v.AddConfigPath("/etc/safescale/features")
+		setViperConfigPathes(v)
 		v.SetConfigName(name)
-
 		err := v.ReadInConfig()
 		err = debug.InjectPlannedError(err)
 		if err != nil {
@@ -434,6 +447,7 @@ func onFeatureFileCacheMiss(_ iaas.Service, name string, embeddedOnly bool) (cac
 			if !v.IsSet("feature") {
 				return nil, fail.SyntaxError("missing keyword 'feature' at the beginning of the file")
 			}
+
 			newInstance = &FeatureFile{
 				fileName:        v.ConfigFileUsed(),
 				displayFileName: v.ConfigFileUsed(),
@@ -1374,10 +1388,206 @@ func ExtractFeatureParameters(params []string) data.Map {
 	return out
 }
 
+func setViperConfigPathes(v *viper.Viper) {
+	if v != nil {
+		for _, i := range featureFileFolders {
+			v.AddConfigPath(i)
+		}
+	}
+}
+
+// watchFeatureFileFolders watches folders that may contain Feature Files and react to changes (invalidating cache entry
+// already loaded)
+func watchFeatureFileFolders() error {
+	watcher, err := rfsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	defer watcher.Close()
+
+	done := make(chan bool)
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				onFeatureFileEvent(watcher, event)
+
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				logrus.Error("Feature File watcher returned an error: ", err)
+			}
+		}
+	}()
+
+	// get current dir
+	cwd, _ := os.Getwd()
+
+	// get homedir
+	home := os.Getenv("HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+
+	for k := range featureFileFolders {
+		if strings.HasPrefix(featureFileFolders[k], "$HOME") {
+			if home != "" {
+				featureFileFolders[k] = home + strings.TrimPrefix(featureFileFolders[k], "$HOME")
+			} else {
+				continue
+			}
+		} else if strings.HasPrefix(featureFileFolders[k], ".") {
+			if cwd != "" {
+				featureFileFolders[k] = cwd + strings.TrimPrefix(featureFileFolders[k], ".")
+			} else {
+				continue
+			}
+		}
+
+		err = addPathToWatch(watcher, featureFileFolders[k])
+		if err != nil {
+			return err
+		}
+	}
+
+	// FIXME: disabled for now, need to add a flag or configuration option to make this part optional
+	// for k := range cwdFeatureFileFolders {
+	// 	if strings.HasPrefix(cwdFeatureFileFolders[k], "$HOME") {
+	// 		if home != "" {
+	// 			cwdFeatureFileFolders[k] = home + strings.TrimPrefix(cwdFeatureFileFolders[k], "$HOME")
+	// 		} else {
+	// 			continue
+	// 		}
+	// 	} else if strings.HasPrefix(cwdFeatureFileFolders[k], ".") {
+	// 		if cwd != "" {
+	// 			cwdFeatureFileFolders[k] = cwd + strings.TrimPrefix(cwdFeatureFileFolders[k], ".")
+	// 		} else {
+	// 			continue
+	// 		}
+	// 	}
+	//
+	// 	err = addPathToWatch(watcher, cwdFeatureFileFolders[k])
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
+
+	<-done
+	return nil
+}
+
+func addPathToWatch(w *rfsnotify.RWatcher, path string) error {
+	err := w.AddRecursive(path)
+	if err != nil {
+		switch casted := err.(type) {
+		case *fs.PathError:
+			switch casted.Err {
+			case unix.ENOENT:
+				// folder not found, ignore it
+				debug.IgnoreError(err)
+			default:
+				logrus.Error(err)
+				return err
+			}
+		default:
+			logrus.Error(err)
+			return err
+		}
+	}
+
+	logrus.Debugf("adding monitoring of folder '%s' for Feature file changes", path)
+	return nil
+}
+
+// onFeatureFileEvent reacts to filesystem change event
+func onFeatureFileEvent(w *rfsnotify.RWatcher, e fsnotify.Event) {
+	switch {
+	case e.Op&fsnotify.Chmod == fsnotify.Chmod:
+		fallthrough
+	case e.Op&fsnotify.Remove == fsnotify.Remove:
+		fallthrough
+	case e.Op&fsnotify.Rename == fsnotify.Rename:
+		fallthrough
+	case e.Op&fsnotify.Write == fsnotify.Write:
+		relativeName := reduceFilename(e.Name)
+		stat, err := os.Stat(e.Name)
+		if err == nil {
+			if stat.IsDir() {
+				// If the fs object is a folder, do nothing more
+				return
+			}
+
+			// If the fs object is a file and is still readable, do nothing more
+			if e.Op&fsnotify.Chmod == fsnotify.Chmod {
+				fd, err := os.Open(e.Name)
+				if err == nil {
+					_ = fd.Close()
+					return
+				}
+			}
+		}
+
+		// From here, we need to invalidate cache entry, either because content has changed or file have been removed/renamed or updated
+		featureName := relativeName
+		if strings.HasSuffix(relativeName, ".yaml") {
+			featureName = strings.TrimSuffix(relativeName, ".yaml")
+		}
+		if strings.HasSuffix(relativeName, ".yml") {
+			featureName = strings.TrimSuffix(relativeName, ".yml")
+		}
+		if len(featureName) != len(relativeName) {
+			featureName = strings.TrimPrefix(featureName, "/")
+			_, xerr := featureFileController.cache.Get(featureName)
+			if xerr == nil {
+				xerr = featureFileController.cache.FreeEntry(featureName)
+			}
+			if xerr != nil {
+				switch xerr.(type) {
+				case *fail.ErrNotFound:
+					// No cache corresponding, ignore the error
+					debug.IgnoreError(xerr)
+				default:
+					// otherwise, log it
+					logrus.Error(xerr)
+				}
+			}
+		}
+
+	case e.Op&fsnotify.Create == fsnotify.Create:
+		// If the object created is a path, add it to RWatcher (if it's a file, nothing more to do, cache miss will
+		// do the necessary in time
+		fi, err := os.Stat(e.Name)
+		if err == nil && fi.IsDir() {
+			w.AddRecursive(e.Name)
+		}
+	}
+}
+
+// reduceFilename removes the absolute part of 'name' corresponding to folder
+func reduceFilename(name string) string {
+	last := name
+	for _, v := range featureFileFolders {
+		if strings.HasPrefix(name, v) {
+			reduced := strings.TrimPrefix(name, v)
+			if len(reduced) < len(last) {
+				last = reduced
+			}
+		}
+	}
+	return last
+}
+
 func init() {
 	var xerr fail.Error
-	featureFileCache, xerr = cache.NewSingleMemoryCache(featureFileKind)
+	featureFileController.cache, xerr = cache.NewSingleMemoryCache(featureFileKind)
 	if xerr != nil {
 		panic(xerr.Error())
 	}
+
+	// Starts go routine watching changes in Feature File folders
+	go watchFeatureFileFolders()
 }
