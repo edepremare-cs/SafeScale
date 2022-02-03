@@ -15,6 +15,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
 	github.com/denisbrodbeck/machineid v1.0.1
+	github.com/farmergreg/rfsnotify v0.0.0-20200716145600-b37be6e4177f
 	github.com/felixge/fgprof v0.9.2
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
 	github.com/gojuno/minimock/v3 v3.0.10
@@ -29,7 +30,7 @@ require (
 	github.com/magiconair/properties v1.8.5
 	github.com/makholm/covertool v0.0.0-20210624102319-bb1c7c716204
 	github.com/mitchellh/copystructure v1.0.0 // indirect
-	github.com/mitchellh/mapstructure v1.4.3
+	github.com/mitchellh/mapstructure v1.4.3 // indirect
 	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12
 	github.com/nakabonne/gosivy v0.2.0
 	github.com/nanobox-io/golang-scribble v0.0.0-20190309225732-aa3e7c118975
@@ -55,6 +56,8 @@ require (
 	google.golang.org/api v0.67.0
 	google.golang.org/grpc v1.44.0
 	google.golang.org/protobuf v1.27.1
+	gopkg.in/fsnotify.v1 v1.4.7
+	gopkg.in/ini.v1 v1.55.0 // indirect
 )
 
 replace gomodules.xyz/stow v0.2.4 => github.com/gomodules/stow v0.2.4
