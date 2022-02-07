@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CS-SI/SafeScale/lib/utils/fs"
 	"github.com/sirupsen/logrus"
 
 	"github.com/CS-SI/SafeScale/lib/utils"
@@ -147,7 +148,7 @@ func (stun *SSHTunnel) Close() fail.Error {
 	defer debug.NewTracer(nil, true).Entering().Exiting()
 
 	defer func() {
-		if lazyErr := utils.LazyRemove(stun.keyFile.Name()); lazyErr != nil {
+		if lazyErr := fs.LazyRemove(stun.keyFile.Name()); lazyErr != nil {
 			logrus.Error(lazyErr)
 		}
 	}()
@@ -785,7 +786,7 @@ func (scmd *SSHCommand) Close() fail.Error {
 	if err1 != nil {
 		logrus.Errorf("SSHCommand.closeTunnels() failed: %s (%s)", err1.Error(), reflect.TypeOf(err1).String())
 		defer func() { // lazy removal
-			ierr := utils.LazyRemove(scmd.keyFile.Name())
+			ierr := fs.LazyRemove(scmd.keyFile.Name())
 			if ierr != nil {
 				debug.IgnoreError(ierr)
 			}
@@ -793,7 +794,7 @@ func (scmd *SSHCommand) Close() fail.Error {
 		return fail.Wrap(err1, "failed to close SSH tunnels")
 	}
 
-	err2 := utils.LazyRemove(scmd.keyFile.Name())
+	err2 := fs.LazyRemove(scmd.keyFile.Name())
 	if err2 != nil {
 		return fail.Wrap(err2, "failed to close SSH tunnels")
 	}
@@ -1306,7 +1307,7 @@ func (sconf *SSHConfig) Enter(username, shell string) (ferr fail.Error) {
 			}
 		}
 		if keyFile != nil {
-			if nerr := utils.LazyRemove(keyFile.Name()); nerr != nil {
+			if nerr := fs.LazyRemove(keyFile.Name()); nerr != nil {
 				logrus.Warnf("Error removing file %v", nerr)
 			}
 		}
@@ -1314,7 +1315,7 @@ func (sconf *SSHConfig) Enter(username, shell string) (ferr fail.Error) {
 	}
 
 	defer func() {
-		derr := utils.LazyRemove(keyFile.Name())
+		derr := fs.LazyRemove(keyFile.Name())
 		if derr != nil {
 			logrus.Warnf("Error removing temporary file: %v", derr)
 		}

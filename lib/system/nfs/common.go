@@ -23,6 +23,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/CS-SI/SafeScale/lib/utils/fs"
 	rice "github.com/GeertJohan/go.rice"
 	"github.com/sirupsen/logrus"
 
@@ -146,7 +147,7 @@ func executeScript(
 	}
 
 	defer func() {
-		if derr := utils.LazyRemove(f.Name()); derr != nil {
+		if derr := fs.LazyRemove(f.Name()); derr != nil {
 			logrus.Warnf("Error deleting file: %v", derr)
 		}
 	}()

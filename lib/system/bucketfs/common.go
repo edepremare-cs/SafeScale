@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/CS-SI/SafeScale/lib/server/resources"
+	"github.com/CS-SI/SafeScale/lib/utils/fs"
 	"github.com/CS-SI/SafeScale/lib/utils/temporal"
 	rice "github.com/GeertJohan/go.rice"
 	"github.com/davecgh/go-spew/spew"
@@ -210,7 +211,7 @@ func uploadContentToFile(
 	}
 
 	defer func() {
-		if derr := utils.LazyRemove(f.Name()); derr != nil {
+		if derr := fs.LazyRemove(f.Name()); derr != nil {
 			logrus.Warnf("Error deleting file: %v", derr)
 		}
 	}()
