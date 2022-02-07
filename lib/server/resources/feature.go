@@ -44,7 +44,7 @@ type Feature interface {
 	data.Identifiable
 
 	Add(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error)    // installs the feature on the target
-	Applyable(Targetable) bool                                                                      // tells if the feature is installable on the target
+	Applicable(Targetable) bool                                                                     // tells if the feature is installable on the target
 	Check(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error)  // check if feature is installed on target
 	GetDisplayFilename() string                                                                     // displays the filename of display (optionally adding '[embedded]' for embedded features)
 	GetFilename() string                                                                            // returns the filename of the feature
