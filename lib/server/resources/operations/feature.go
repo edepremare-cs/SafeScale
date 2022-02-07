@@ -43,8 +43,10 @@ import (
 	"github.com/CS-SI/SafeScale/lib/utils/concurrency"
 	"github.com/CS-SI/SafeScale/lib/utils/data"
 	"github.com/CS-SI/SafeScale/lib/utils/data/cache"
+	"github.com/CS-SI/SafeScale/lib/utils/data/observer"
 	"github.com/CS-SI/SafeScale/lib/utils/data/serialize"
 	"github.com/CS-SI/SafeScale/lib/utils/debug"
+	"github.com/CS-SI/SafeScale/lib/utils/debug/callstack"
 	"github.com/CS-SI/SafeScale/lib/utils/debug/tracing"
 	"github.com/CS-SI/SafeScale/lib/utils/fail"
 	"github.com/CS-SI/SafeScale/lib/utils/temporal"
@@ -714,14 +716,14 @@ func NewEmbeddedFeature(svc iaas.Service, name string) (_ resources.Feature, xer
 }
 
 // IsNull tells if the instance represents a null value
-func (f *Feature) IsNull() bool {
-	return f == nil || f.file == nil
+func (instance *Feature) IsNull() bool {
+	return instance == nil || instance.file == nil
 }
 
 // Clone ...
 // satisfies interface data.Clonable
 func (instance *Feature) Clone() data.Clonable {
-	res := FeatureNullValue()
+	res := &Feature{}
 	return res.Replace(instance)
 }
 
@@ -755,7 +757,7 @@ func (instance *Feature) GetName() string {
 		return ""
 	}
 
-	return f.file.displayName
+	return instance.file.displayName
 }
 
 // GetID ...
@@ -772,7 +774,7 @@ func (instance *Feature) GetFilename() string {
 		return ""
 	}
 
-	return f.file.fileName
+	return instance.file.fileName
 }
 
 // GetDisplayFilename returns the filename of the Feature definition, beautifulled, with error handling
@@ -780,7 +782,7 @@ func (instance *Feature) GetDisplayFilename() string {
 	if instance.IsNull() {
 		return ""
 	}
-	return f.file.displayFileName
+	return instance.file.displayFileName
 }
 
 // installerOfMethod instanciates the right installer corresponding to the method
@@ -810,10 +812,10 @@ func (instance *Feature) Specs() *viper.Viper {
 		return &viper.Viper{}
 	}
 
-	return f.file.Specs()
+	return instance.file.Specs()
 }
 
-// Applyable tells if the Feature is installable on the target
+// Applicable tells if the Feature is installable on the target
 func (instance *Feature) Applicable(t resources.Targetable) bool {
 	if instance.IsNull() {
 		return false
@@ -907,7 +909,7 @@ func (instance *Feature) Check(ctx context.Context, target resources.Targetable,
 	logrus.Debugf("Checking if Feature '%s' is installed on %s '%s'...\n", featureName, targetType, targetName)
 
 	// Inits and checks target parameters
-	conditionedParameters, xerr := f.conditionParameters(v)
+	conditionedParameters, xerr := instance.conditionParameters(v)
 	if xerr != nil {
 		return nil, xerr
 	}
@@ -940,15 +942,15 @@ func (instance *Feature) Check(ctx context.Context, target resources.Targetable,
 // Returned error may be:
 //  - nil: everything went well
 //  - fail.InvalidRequestError: a required parameter is missing (value not provided in externals and no default value defined)
-func (f Feature) conditionParameters(externals data.Map) (ConditionedFeatureParameters, fail.Error) {
+func (instance Feature) conditionParameters(externals data.Map) (ConditionedFeatureParameters, fail.Error) {
 	var xerr fail.Error
 	conditioned := make(ConditionedFeatureParameters)
-	for k, v := range f.file.parameters {
+	for k, v := range instance.file.parameters {
 		value, ok := externals[k].(string)
 		if ok {
 			conditioned[k], xerr = NewConditionedFeatureParameter(v, &value)
 		} else {
-			value, ok := externals[f.GetName()+":"+k].(string)
+			value, ok := externals[instance.GetName()+":"+k].(string)
 			if ok {
 				conditioned[k], xerr = NewConditionedFeatureParameter(v, &value)
 			} else {
@@ -965,7 +967,7 @@ func (f Feature) conditionParameters(externals data.Map) (ConditionedFeaturePara
 // findInstallerForTarget isolates the available installer to use for target (one that is define in the file and applicable on target)
 func (instance *Feature) findInstallerForTarget(target resources.Targetable, action string) (installer Installer, xerr fail.Error) {
 	methods := target.InstallMethods()
-	w := f.file.specs.GetStringMap("feature.install")
+	w := instance.file.specs.GetStringMap("feature.install")
 	for i := uint8(1); i <= uint8(len(methods)); i++ {
 		meth := methods[i]
 		if _, ok := w[strings.ToLower(meth.String())]; ok {
@@ -1074,7 +1076,7 @@ func (instance *Feature) Add(ctx context.Context, target resources.Targetable, v
 	}
 
 	// Inits and checks target parameters
-	conditionedParameters, xerr := f.conditionParameters(v)
+	conditionedParameters, xerr := instance.conditionParameters(v)
 	if xerr != nil {
 		return nil, xerr
 	}
@@ -1184,7 +1186,7 @@ func (instance *Feature) Remove(ctx context.Context, target resources.Targetable
 	)()
 
 	// Inits and checks target parameters
-	conditionedParameters, xerr := f.conditionParameters(v)
+	conditionedParameters, xerr := instance.conditionParameters(v)
 	if xerr != nil {
 		return nil, xerr
 	}
@@ -1229,16 +1231,16 @@ func (instance *Feature) GetRequirements() (map[string]struct{}, fail.Error) {
 		return emptyMap, fail.InvalidInstanceError()
 	}
 
-	out := make(map[string]struct{}, len(f.file.specs.GetStringSlice(yamlKey)))
-	for _, r := range f.file.specs.GetStringSlice(yamlKey) {
+	out := make(map[string]struct{}, len(instance.file.specs.GetStringSlice(yamlKey)))
+	for _, r := range instance.file.specs.GetStringSlice(yamlKey) {
 		out[r] = struct{}{}
 	}
 	return out, nil
 }
 
 // installRequirements walks through requirements and installs them if needed
-func (f *Feature) installRequirements(ctx context.Context, t resources.Targetable, v data.Map, s resources.FeatureSettings) fail.Error {
-	if f.file.specs.IsSet(yamlKey) {
+func (instance *Feature) installRequirements(ctx context.Context, t resources.Targetable, v data.Map, s resources.FeatureSettings) fail.Error {
+	if instance.file.specs.IsSet(yamlKey) {
 		{
 			msgHead := fmt.Sprintf("Checking requirements of Feature '%s'", instance.GetName())
 			var msgTail string
@@ -1256,8 +1258,8 @@ func (f *Feature) installRequirements(ctx context.Context, t resources.Targetabl
 		targetIsCluster := t.TargetType() == featuretargettype.Cluster
 
 		// clone FeatureSettings to set DoNotUpdateHostMetadataInClusterContext
-		for _, requirement := range f.file.specs.GetStringSlice(yamlKey) {
-			needed, xerr := NewFeature(f.svc, requirement)
+		for _, requirement := range instance.file.specs.GetStringSlice(yamlKey) {
+			needed, xerr := NewFeature(instance.svc, requirement)
 			xerr = debug.InjectPlannedFail(xerr)
 			if xerr != nil {
 				return fail.Wrap(xerr, "failed to find required Feature '%s'", requirement)
@@ -1366,11 +1368,11 @@ func (instance Feature) ToProtocol() *protocol.FeatureResponse {
 	return out
 }
 
-func (f Feature) ListParametersWithControl() []string {
+func (instance Feature) ListParametersWithControl() []string {
 	return nil
 }
 
-func (f Feature) VersionForParameter(p string) (string, fail.Error) {
+func (instance Feature) VersionForParameter(p string) (string, fail.Error) {
 	return "", fail.NotImplementedError()
 }
 
@@ -1403,7 +1405,7 @@ func watchFeatureFileFolders() error {
 	if err != nil {
 		return err
 	}
-	defer watcher.Close()
+	defer func() { _ = watcher.Close() }()
 
 	done := make(chan bool)
 	go func() {
@@ -1562,7 +1564,7 @@ func onFeatureFileEvent(w *rfsnotify.RWatcher, e fsnotify.Event) {
 		// do the necessary in time
 		fi, err := os.Stat(e.Name)
 		if err == nil && fi.IsDir() {
-			w.AddRecursive(e.Name)
+			_ = w.AddRecursive(e.Name)
 		}
 	}
 }
@@ -1571,6 +1573,14 @@ func onFeatureFileEvent(w *rfsnotify.RWatcher, e fsnotify.Event) {
 func reduceFilename(name string) string {
 	last := name
 	for _, v := range featureFileFolders {
+		if strings.HasPrefix(name, v) {
+			reduced := strings.TrimPrefix(name, v)
+			if len(reduced) < len(last) {
+				last = reduced
+			}
+		}
+	}
+	for _, v := range cwdFeatureFileFolders {
 		if strings.HasPrefix(name, v) {
 			reduced := strings.TrimPrefix(name, v)
 			if len(reduced) < len(last) {
@@ -1589,5 +1599,10 @@ func init() {
 	}
 
 	// Starts go routine watching changes in Feature File folders
-	go watchFeatureFileFolders()
+	go func() {
+		err := watchFeatureFileFolders()
+		if err != nil {
+			logrus.Error(err)
+		}
+	}()
 }
