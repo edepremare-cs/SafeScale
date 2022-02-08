@@ -10,18 +10,18 @@ type parent struct {
 	children map[string]struct{}
 }
 
-func newParent(path string) (*parent, error) {
+func newParent(path string) (*parent, fail.Error) {
 	if path == "" {
 		return nil, fail.InvalidParameterCannotBeEmptyStringError("path")
 	}
 
-	fld, err := newEntry(path, FolderTypeEntry, false, DoNotWatchForCreation)
-	if err != nil {
-		return nil, err
+	entry, xerr := newEntry(path, FolderTypeEntry, false, DoNotWatchForCreation)
+	if xerr != nil {
+		return nil, xerr
 	}
 
 	out := parent{
-		Entry:    fld,
+		Entry:    entry,
 		children: make(map[string]struct{}),
 	}
 	return &out, nil

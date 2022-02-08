@@ -24,11 +24,11 @@ type Entry struct {
 	father      *parent // if watchParent == true, contains the parent instance
 	watchParent bool    // if == true, watch parent kind for entry creation
 	recurse     bool    // if == true, watch kind and subfolders
-	active      bool    // if == true, the watch is activa
+	// active      bool    // if == true, the watch is active
 }
 
 // newEntry ...
-func newEntry(path string, kind EntryType, recurse, watchParent bool) (*Entry, error) {
+func newEntry(path string, kind EntryType, recurse, watchParent bool) (*Entry, fail.Error) {
 	if path == "" {
 		return nil, fail.InvalidParameterCannotBeEmptyStringError("path")
 	}
@@ -36,7 +36,7 @@ func newEntry(path string, kind EntryType, recurse, watchParent bool) (*Entry, e
 	fi, err := os.Stat(path)
 	if err == nil {
 		if fi.IsDir() {
-			if kind == FileTypeEntry {
+			if kind == FileTypeEntry { //nolint
 				return nil, fail.InvalidRequestError("cannot watch a file as if it's a folder")
 			}
 		} else {
@@ -47,7 +47,7 @@ func newEntry(path string, kind EntryType, recurse, watchParent bool) (*Entry, e
 		}
 	} else {
 		// path not found, no sense if watchForCreation is false
-		if watchParent == DoNotWatchForCreation {
+		if watchParent == DoNotWatchForCreation { // nolint
 			return nil, fail.InvalidRequestError("cannot watch non-existent entry if not explicitly asked for creation watch")
 		}
 	}
@@ -75,69 +75,69 @@ func newEntry(path string, kind EntryType, recurse, watchParent bool) (*Entry, e
 	return &out, nil
 }
 
-func (f *Entry) SetCallbackOnFolderCreation(cb func(*Entry) error) error {
-	if f == nil {
+func (instance *Entry) SetCallbackOnFolderCreation(cb func(*Entry) error) error {
+	if instance == nil {
 		return fail.InvalidInstanceError()
 	}
-	if !f.kind {
+	if !instance.kind {
 		return fail.InvalidRequestError("cannot set callback on folder creation event for a file")
 	}
 	if cb == nil {
 		return fail.InvalidParameterCannotBeNilError("cb")
 	}
 
-	f.handlers.onFolderCreation = cb
+	instance.handlers.onFolderCreation = cb
 	return nil
 }
 
-func (f *Entry) SetCallbackOnFolderRemoval(cb func(*Entry) error) error {
-	if f == nil {
+func (instance *Entry) SetCallbackOnFolderRemoval(cb func(*Entry) error) error {
+	if instance == nil {
 		return fail.InvalidInstanceError()
 	}
-	if !f.kind {
+	if !instance.kind {
 		return fail.InvalidRequestError("cannot set callback on folder creation event for a file")
 	}
 	if cb == nil {
 		return fail.InvalidParameterCannotBeNilError("cb")
 	}
 
-	f.handlers.onFolderRemoval = cb
+	instance.handlers.onFolderRemoval = cb
 	return nil
 }
 
-func (f *Entry) SetCallbackOnFileCreation(cb func(*Entry) error) error {
-	if f == nil {
+func (instance *Entry) SetCallbackOnFileCreation(cb func(*Entry) error) error {
+	if instance == nil {
 		return fail.InvalidInstanceError()
 	}
 	if cb == nil {
 		return fail.InvalidParameterCannotBeNilError("cb")
 	}
 
-	f.handlers.onFileCreation = cb
+	instance.handlers.onFileCreation = cb
 	return nil
 }
 
-func (f *Entry) SetCallbackOnFileRemoval(cb func(*Entry) error) error {
-	if f == nil {
+func (instance *Entry) SetCallbackOnFileRemoval(cb func(*Entry) error) error {
+	if instance == nil {
 		return fail.InvalidInstanceError()
 	}
 	if cb == nil {
 		return fail.InvalidParameterCannotBeNilError("cb")
 	}
 
-	f.handlers.onFileRemoval = cb
+	instance.handlers.onFileRemoval = cb
 	return nil
 }
 
-func (f *Entry) SetCallbackOnFileChange(cb func(*Entry) error) error {
-	if f == nil {
+func (instance *Entry) SetCallbackOnFileChange(cb func(*Entry) error) error {
+	if instance == nil {
 		return fail.InvalidInstanceError()
 	}
 	if cb == nil {
 		return fail.InvalidParameterCannotBeNilError("cb")
 	}
 
-	f.handlers.onFileChange = cb
+	instance.handlers.onFileChange = cb
 	return nil
 }
 

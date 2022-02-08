@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/sirupsen/logrus"
 )
 
 type events struct {
@@ -42,7 +43,10 @@ func (w *Watcher) onEvent(e fsnotify.Event) {
 
 			// Cannot read the file after chmod, call the handler onFileChange
 			if entry.handlers.onFileChange != nil {
-				entry.handlers.onFileChange(entry)
+				err = entry.handlers.onFileChange(entry)
+				if err != nil {
+					logrus.Error(err)
+				}
 			}
 		}
 
@@ -51,10 +55,16 @@ func (w *Watcher) onEvent(e fsnotify.Event) {
 		if err == nil {
 			if stat.IsDir() {
 				if entry.handlers.onFolderRemoval != nil {
-					entry.handlers.onFolderRemoval(entry)
+					err = entry.handlers.onFolderRemoval(entry)
+					if err != nil {
+						logrus.Error(err)
+					}
 				}
 			} else if entry.handlers.onFileRemoval != nil {
-				entry.handlers.onFileRemoval(entry)
+				err = entry.handlers.onFileRemoval(entry)
+				if err != nil {
+					logrus.Error(err)
+				}
 			}
 		}
 
@@ -66,10 +76,16 @@ func (w *Watcher) onEvent(e fsnotify.Event) {
 		if err == nil {
 			if stat.IsDir() {
 				if entry.handlers.onFolderCreation != nil {
-					entry.handlers.onFolderCreation(entry)
+					err = entry.handlers.onFolderCreation(entry)
+					if err != nil {
+						logrus.Error(err)
+					}
 				}
 			} else if entry.handlers.onFileCreation != nil {
-				entry.handlers.onFileCreation(entry)
+				err = entry.handlers.onFileCreation(entry)
+				if err != nil {
+					logrus.Error(err)
+				}
 			}
 		}
 	}

@@ -22,7 +22,7 @@ type Watcher struct {
 }
 
 // NewWatcher creates a new instance of Watcher
-func NewWatcher(ctx context.Context, settings Settings) (*Watcher, error) {
+func NewWatcher(settings Settings) (*Watcher, error) {
 	out := &Watcher{
 		watched:  newEntries(),
 		fathers:  newParents(),
@@ -33,38 +33,41 @@ func NewWatcher(ctx context.Context, settings Settings) (*Watcher, error) {
 }
 
 // Start starts watcher
-func (w *Watcher) Start(ctx context.Context) (outerr error) {
+func (w *Watcher) Start(ctx context.Context) (outerr fail.Error) {
 	defer func() {
 		if outerr != nil {
-			w.Stop()
+			err := w.Stop()
+			if err != nil {
+				_ = outerr.AddConsequence(err)
+			}
 		}
 	}()
 
 	fsnotifyW, err := fsnotify.NewWatcher()
 	if err != nil {
-		return err
+		return fail.ConvertError(err)
 	}
 
+	var xerr fail.Error
 	w.fsnotify = fsnotifyW
-	w.task, err = concurrency.NewTaskWithContext(ctx)
-	if err != nil {
-		return err
+	w.task, xerr = concurrency.NewTaskWithContext(ctx)
+	if xerr != nil {
+		return xerr
 	}
 
 	// Adds all pathes to watch
 	for _, v := range w.watched {
-		err := w.addWatch(v)
+		xerr := w.addWatch(v)
 		if err != nil {
-			return err
+			return xerr
 		}
 	}
 
 	// Now starts task that does the watch
-	_, err = w.task.Start(func(t concurrency.Task, _ concurrency.TaskParameters) (concurrency.TaskResult, fail.Error) {
+	_, xerr = w.task.Start(func(t concurrency.Task, _ concurrency.TaskParameters) (concurrency.TaskResult, fail.Error) {
 		return nil, w.watch(t)
 	}, nil)
-
-	return err
+	return xerr
 }
 
 // watch is the function that receive fsnotify signals
@@ -88,20 +91,29 @@ func (w *Watcher) watch(task concurrency.Task) fail.Error {
 			logrus.Error("watcher returned an error: ", err)
 		}
 	}
-
-	return nil
 }
 
 // Stop stops watcher and cleanup
-func (w *Watcher) Stop() error {
+func (w *Watcher) Stop() fail.Error {
 	if w.task != nil {
-		w.task.Abort()
-		w.task.Wait()
+		xerr := w.task.Abort()
+		if xerr != nil {
+			return xerr
+		}
+
+		_, xerr = w.task.Wait()
+		if xerr != nil {
+			return xerr
+		}
+
 		w.task = nil
 	}
 
 	if w.fsnotify != nil {
-		w.fsnotify.Close()
+		err := w.fsnotify.Close()
+		if err != nil {
+			return fail.ConvertError(err)
+		}
 		w.fsnotify = nil
 	}
 
@@ -145,7 +157,7 @@ func (w *Watcher) Add(path string, kind EntryType, recurse, watchParent bool) (*
 }
 
 // addWatch ...
-func (w *Watcher) addWatch(entry *Entry) error {
+func (w *Watcher) addWatch(entry *Entry) fail.Error {
 	if w == nil {
 		return fail.InvalidInstanceError()
 	}
@@ -154,7 +166,7 @@ func (w *Watcher) addWatch(entry *Entry) error {
 	}
 
 	if entry.recurse {
-		return filepath.Walk(entry.path, func(walkPath string, fi os.FileInfo, err error) error {
+		err := filepath.Walk(entry.path, func(walkPath string, fi os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -171,21 +183,22 @@ func (w *Watcher) addWatch(entry *Entry) error {
 			}
 			return nil
 		})
+		return fail.ConvertError(err)
 	}
 
 	if entry.watchParent {
 		dirname := filepath.Dir(entry.path)
 		father, ok := w.fathers[dirname]
 		if !ok {
-			var err error
-			father, err = newParent(dirname)
-			if err != nil {
-				return err
+			var xerr fail.Error
+			father, xerr = newParent(dirname)
+			if xerr != nil {
+				return xerr
 			}
 
-			err = w.fsnotify.Add(father.path)
+			err := w.fsnotify.Add(father.path)
 			if err != nil {
-				return err
+				return fail.ConvertError(err)
 			}
 
 			w.pathes[dirname] = father.Entry
@@ -195,7 +208,7 @@ func (w *Watcher) addWatch(entry *Entry) error {
 
 	err := w.fsnotify.Add(entry.path)
 	if err != nil {
-		return err
+		return fail.ConvertError(err)
 	}
 
 	return nil
