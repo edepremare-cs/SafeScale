@@ -128,7 +128,7 @@ func (instance *Cluster) taskCreateCluster(task concurrency.Task, params concurr
 		req.InitialNodeCount = privateNodeCount
 	}
 
-	// Define the sizing requirements for Cluster hosts
+	// Define the sizing dependencies for Cluster hosts
 	if req.GatewaysDef.Image == "" {
 		req.GatewaysDef.Image = req.OS
 	}
@@ -1533,7 +1533,7 @@ func (instance *Cluster) taskInstallGateway(task concurrency.Task, params concur
 		return nil, xerr
 	}
 
-	// Installs requirements as defined by Cluster Flavor (if it exists)
+	// Installs dependencies as defined by Cluster Flavor (if it exists)
 	xerr = instance.installNodeRequirements(task.Context(), clusternodetype.Gateway, p.host, hostLabel)
 	xerr = debug.InjectPlannedFail(xerr)
 	if xerr != nil {

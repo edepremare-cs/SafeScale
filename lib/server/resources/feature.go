@@ -48,7 +48,7 @@ type Feature interface {
 	Check(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error)  // check if feature is installed on target
 	GetDisplayFilename() string                                                                     // displays the filename of display (optionally adding '[embedded]' for embedded features)
 	GetFilename() string                                                                            // returns the filename of the feature
-	GetRequirements() (map[string]struct{}, fail.Error)                                             // returns the other features needed as requirements
+	Dependencies() (map[string]struct{}, fail.Error)                                                // returns the other features needed as requirements
 	ListParametersWithControl() []string                                                            // returns a list of parameter containing version information
 	Remove(ctx context.Context, t Targetable, v data.Map, fs FeatureSettings) (Results, fail.Error) // uninstalls the feature from the target
 	ToProtocol() *protocol.FeatureResponse

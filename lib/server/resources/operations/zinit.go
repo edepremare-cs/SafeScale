@@ -66,7 +66,7 @@ func init() {
 
 		// allEmbeddedMap[item.BaseFilename()] = item
 		allEmbeddedFeaturesMap[itemName] = item
-		installers := item.specs.GetStringMap("feature.install")
+		installers := item.Specs().GetStringMap("feature.install")
 		for k := range installers {
 			meth, err := installmethod.Parse(k)
 			if err != nil {

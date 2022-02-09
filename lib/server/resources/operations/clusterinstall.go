@@ -282,7 +282,7 @@ func (instance *Cluster) RegisterFeature(feat resources.Feature, requiredBy reso
 
 			var item *propertiesv1.ClusterInstalledFeature
 			if item, ok = featuresV1.Installed[feat.GetName()]; !ok {
-				requirements, innerXErr := feat.GetRequirements()
+				requirements, innerXErr := feat.Dependencies()
 				if innerXErr != nil {
 					return innerXErr
 				}
@@ -751,15 +751,15 @@ func (instance *Cluster) installNodeRequirements(ctx context.Context, nodeType c
 	retcode, stdout, stderr, xerr := instance.ExecuteScript(ctx, "node_install_requirements.sh", params, host)
 	xerr = debug.InjectPlannedFail(xerr)
 	if xerr != nil {
-		return fail.Wrap(xerr, "[%s] system requirements installation failed", hostLabel)
+		return fail.Wrap(xerr, "[%s] system dependencies installation failed", hostLabel)
 	}
 	if retcode != 0 {
-		xerr = fail.ExecutionError(nil, "failed to install common node requirements")
+		xerr = fail.ExecutionError(nil, "failed to install common node dependencies")
 		xerr.Annotate("retcode", retcode).Annotate("stdout", stdout).Annotate("stderr", stderr)
 		return xerr
 	}
 
-	logrus.Debugf("[%s] system requirements installation successful.", hostLabel)
+	logrus.Debugf("[%s] system dependencies installation successful.", hostLabel)
 	return nil
 }
 

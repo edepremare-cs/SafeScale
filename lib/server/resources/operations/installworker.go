@@ -28,8 +28,6 @@ import (
 	txttmpl "text/template"
 	"time"
 
-	"github.com/CS-SI/SafeScale/lib/system"
-	"github.com/CS-SI/SafeScale/lib/utils/app"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/sirupsen/logrus"
 
@@ -45,7 +43,9 @@ import (
 	"github.com/CS-SI/SafeScale/lib/server/resources/enums/securitygroupruledirection"
 	propertiesv1 "github.com/CS-SI/SafeScale/lib/server/resources/properties/v1"
 	propertiesv3 "github.com/CS-SI/SafeScale/lib/server/resources/properties/v3"
+	"github.com/CS-SI/SafeScale/lib/system"
 	"github.com/CS-SI/SafeScale/lib/utils"
+	"github.com/CS-SI/SafeScale/lib/utils/app"
 	"github.com/CS-SI/SafeScale/lib/utils/concurrency"
 	"github.com/CS-SI/SafeScale/lib/utils/data"
 	"github.com/CS-SI/SafeScale/lib/utils/data/serialize"
@@ -108,8 +108,7 @@ type worker struct {
 	settings  resources.FeatureSettings
 	startTime time.Time
 
-	host *Host
-	// node    bool
+	host    *Host
 	cluster *Cluster
 
 	availableMaster  resources.Host
@@ -1044,12 +1043,21 @@ func (w *worker) validateClusterSizing(ctx context.Context) (xerr fail.Error) {
 	if xerr != nil {
 		return xerr
 	}
-	yamlKey := "feature.requirements.clusterSizing." + strings.ToLower(clusterFlavor.String())
-	if !w.feature.Specs().IsSet(yamlKey) {
+
+	// yamlKey := "feature.dependencies.clusterSizing." + strings.ToLower(clusterFlavor.String())
+	// if !w.feature.Specs().IsSet(yamlKey) {
+	// 	return nil
+	// }
+	sizing, xerr := w.feature.ClusterSizingRequirementsForFlavor(strings.ToLower(clusterFlavor.String()))
+	if xerr != nil {
+		return xerr
+	}
+
+	if sizing == nil {
+		// No sizing requirement for the cluster flavor, so everything is ok
 		return nil
 	}
 
-	sizing := w.feature.Specs().GetStringMap(yamlKey)
 	if anon, ok := sizing["masters"]; ok {
 		request, ok := anon.(string)
 		if !ok {
@@ -1101,7 +1109,8 @@ func (w *worker) validateClusterSizing(ctx context.Context) (xerr fail.Error) {
 }
 
 // parseClusterSizingRequest returns count, cpu and ram components of request
-func (w *worker) parseClusterSizingRequest(_ /*request*/ string) (int, int, float32, fail.Error) {
+func (w *worker) parseClusterSizingRequest(request string) (int, int, float32, fail.Error) {
+	_ = request
 	return 0, 0, 0.0, fail.NotImplementedError("parseClusterSizingRequest() not yet implemented")
 }
 
@@ -1237,7 +1246,7 @@ func (w *worker) setReverseProxy(ctx context.Context) (ferr fail.Error) {
 			// FIXME: Refactoring, this defer is actually dangerous
 			// each host iteration will trigger a defer function, and ALL the functions run at the same time at the end, triggered by the ferr error
 			// shared by everyone, this it clearly a bad idea, this needs refactoring
-			defer func(tag concurrency.TaskGroup, iwaited *bool, iright *bool) {
+			defer func(tag concurrency.TaskGroup, iwaited *bool, iright *bool) { // nolint
 				if ferr != nil {
 					if !*iright { // not for us
 						return

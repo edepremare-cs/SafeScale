@@ -827,7 +827,7 @@ func (tv toV21_05_0) upgradeClusterMetadataIfNeeded(instance *operations.Cluster
 						return innerXErr
 					}
 
-					requires, innerXErr = feat.GetRequirements()
+					requires, innerXErr = feat.Dependencies()
 					if innerXErr != nil {
 						return innerXErr
 					}
@@ -916,7 +916,7 @@ func (tv toV21_05_0) upgradeClusterMetadataIfNeeded(instance *operations.Cluster
 }
 
 func (tv toV21_05_0) addFeatureInProperties(feat resources.Feature, svc iaas.Service, hosts data.IndexedListOfStrings) fail.Error {
-	requires, xerr := feat.GetRequirements()
+	requires, xerr := feat.Dependencies()
 	if xerr != nil {
 		return xerr
 	}
@@ -930,7 +930,7 @@ func (tv toV21_05_0) addFeatureInProperties(feat resources.Feature, svc iaas.Ser
 			continue
 		}
 
-		req, xerr := f.GetRequirements()
+		req, xerr := f.Dependencies()
 		if xerr != nil {
 			logrus.Error(xerr.Error())
 			continue

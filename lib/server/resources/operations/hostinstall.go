@@ -94,7 +94,7 @@ func (instance *Host) AddFeature(ctx context.Context, name string, vars data.Map
 				return fail.InconsistentError("expected '*propertiesv1.HostFeatures', received '%s'", reflect.TypeOf(clonable))
 			}
 
-			requires, innerXErr := feat.GetRequirements()
+			requires, innerXErr := feat.Dependencies()
 			if innerXErr != nil {
 				return innerXErr
 			}
@@ -275,7 +275,7 @@ func (instance *Host) RegisterFeature(feat resources.Feature, requiredBy resourc
 
 			var item *propertiesv1.HostInstalledFeature
 			if item, ok = featuresV1.Installed[feat.GetName()]; !ok {
-				requirements, innerXErr := feat.GetRequirements()
+				requirements, innerXErr := feat.Dependencies()
 				if innerXErr != nil {
 					return innerXErr
 				}

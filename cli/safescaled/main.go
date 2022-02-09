@@ -27,6 +27,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/CS-SI/SafeScale/lib/server/resources/operations"
 	"github.com/CS-SI/SafeScale/lib/utils/fail"
 	"github.com/CS-SI/SafeScale/lib/utils/heartbeat"
 	"github.com/makholm/covertool/pkg/exit"
@@ -138,6 +139,8 @@ func work(c *cli.Context) {
 	// - /debug/metrics
 	// - /debug/fgprof
 	expose()
+
+	operations.StartFeatureFileWatcher()
 
 	version := Version + ", build " + Revision + " (" + BuildDate + ")"
 	if              //goland:noinspection GoBoolExpressions

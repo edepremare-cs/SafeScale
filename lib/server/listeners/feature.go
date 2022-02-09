@@ -102,6 +102,7 @@ func (s *FeatureListener) List(ctx context.Context, in *protocol.FeatureListRequ
 		defer hostInstance.Released()
 
 		return empty, fail.NotImplementedError()
+
 	case protocol.FeatureTargetType_FT_CLUSTER:
 		clusterInstance, xerr := clusterfactory.Load(job.Context(), job.Service(), targetRef)
 		if xerr != nil {
