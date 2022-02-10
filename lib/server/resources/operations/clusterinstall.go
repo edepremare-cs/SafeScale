@@ -341,35 +341,31 @@ func (instance *Cluster) ListEligibleFeatures(ctx context.Context) (_ []resource
 	instance.lock.RLock()
 	defer instance.lock.RUnlock()
 
-	// var list map[string]*propertiesv1.ClusterInstalledFeature
-	// xerr := instance.Inspect(func(_ data.Clonable, props *serialize.JSONProperties) fail.Error {
-	// 	return props.Inspect(clusterproperty.FeaturesV1, func(clonable data.Clonable) fail.Error {
-	// 		featuresV1, ok := clonable.(*propertiesv1.ClusterFeatures)
-	// 		if !ok {
-	// 			return fail.InconsistentError("'*propertiesv1.ClusterFeatures' expected, '%s' provided", reflect.TypeOf(clonable).String())
-	// 		}
-	//
-	// 		list = featuresV1.Installed
-	// 		return nil
-	// 	})
-	// })
-	// xerr = debug.InjectPlannedFail(xerr)
-	// if xerr != nil {
-	// 	return emptySlice, xerr
-	// }
-	//
-	// out := make([]resources.Feature, 0, len(list))
-	// for k := range list {
-	// 	item, xerr := NewFeature(instance.Service(), k)
-	// 	xerr = debug.InjectPlannedFail(xerr)
-	// 	if xerr != nil {
-	// 		return emptySlice, xerr
-	// 	}
-	//
-	// 	out = append(out, item)
-	// }
-	// return out, nil
-	return nil, fail.NotImplementedError()
+	// FIXME: 'allWithEmbedded' should be passed as parameter...
+	// walk through the folders that may contain Feature files
+	list, xerr := walkInsideFeatureFileFolders(allWithEmbedded)
+	if xerr != nil {
+		return nil, xerr
+	}
+
+	var out []resources.Feature
+	for _, v := range list {
+		entry, xerr := NewFeature(instance.Service(), v)
+		if xerr != nil {
+			switch xerr.(type) {
+			case *fail.ErrNotFound:
+				// ignore a feature file not found; weird, but fs may have changed (will be handled properly later with fswatcher)
+			default:
+				return nil, xerr
+			}
+		}
+
+		if entry.Applicable(instance) {
+			out = append(out, entry)
+		}
+	}
+
+	return out, nil
 }
 
 // ListInstalledFeatures returns a slice of installed features

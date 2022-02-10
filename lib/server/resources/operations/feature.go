@@ -83,11 +83,12 @@ func ListFeatures(svc iaas.Service, suitableFor string) (_ []interface{}, xerr f
 			continue
 		}
 		for _, f := range files {
+			// FIXME: this code accepts only .yml as extension... Should we keep that?
 			if strings.HasSuffix(strings.ToLower(f.Name()), ".yml") {
-				featFile, xerr := LoadFeatureFile(svc, strings.Replace(strings.ToLower(f.Name()), ".yml", "", 1), false)
+				featFile, xerr := LoadFeatureFile(svc, strings.TrimSuffix(strings.ToLower(f.Name()), ".yml"), false)
 				xerr = debug.InjectPlannedFail(xerr)
 				if xerr != nil {
-					logrus.Warn(xerr) // Don't hide errors
+					logrus.Warn(xerr)
 					continue
 				}
 
@@ -286,6 +287,32 @@ func (instance *Feature) Applicable(t resources.Targetable) bool {
 		return false
 	}
 
+	// 1st check Feature is suitable for target
+	switch t.TargetType() {
+	case featuretargettype.Cluster:
+		casted := t.(*Cluster)
+		flavor, xerr := casted.GetFlavor()
+		if xerr != nil {
+			logrus.Error(fail.Wrap(xerr, "failed to get Cluster Flavor"))
+			return false
+		}
+		if _, ok := instance.file.suitableFor[flavor.String()]; !ok {
+			return false
+		}
+
+	case featuretargettype.Host:
+		if _, ok := instance.file.suitableFor["host"]; !ok {
+			return false
+		}
+	}
+
+	// 2nd in case of a cluster, check cluster sizing requirements
+	switch t.TargetType() {
+	case featuretargettype.Cluster:
+		// FIXME: implement this
+	}
+
+	// 2nd check there is an install method the target can use
 	methods := t.InstallMethods()
 	for _, k := range methods {
 		installer := instance.InstanciateInstallerOfMethod(k)
@@ -818,4 +845,50 @@ func ExtractFeatureParameters(params []string) data.Map {
 		}
 	}
 	return out
+}
+
+// featureFilter represents the filter to apply on Features
+type featureFilter string
+
+const (
+	embeddedOnly    featureFilter = "embedded"
+	allWithEmbedded featureFilter = "all"
+	withoutEmbedded featureFilter = "withoutEmbedded"
+)
+
+// filterEligibleFeatures lists the available features than can be installed on target
+func filterEligibleFeatures(target resources.Targetable, filter featureFilter) ([]resources.Feature, fail.Error) {
+	if target == nil {
+		return nil, fail.InvalidParameterCannotBeNilError("target")
+	}
+
+	// walk through the folders that may contain Feature files
+	list, xerr := walkInsideFeatureFileFolders(filter)
+	if xerr != nil {
+		return nil, xerr
+	}
+
+	var out []resources.Feature
+	for _, v := range list {
+		entry, xerr := NewFeature(target.Service(), v)
+		if xerr != nil {
+			switch xerr.(type) {
+			case *fail.ErrNotFound:
+				// ignore a feature file not found; weird, but fs may have changed (will be handled properly later with fswatcher)
+			case *fail.ErrSyntax:
+				// When a synta error occurs, log but do not fail
+				logrus.Error(fail.Wrap(xerr, "failed to load Feature '%s'", v))
+				continue
+			default:
+				return nil, xerr
+			}
+		}
+
+		if entry.Applicable(target) {
+			out = append(out, entry)
+		}
+	}
+
+	return out, nil
+
 }

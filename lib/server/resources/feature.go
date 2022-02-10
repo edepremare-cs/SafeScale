@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/CS-SI/SafeScale/lib/protocol"
+	"github.com/CS-SI/SafeScale/lib/server/iaas"
 	"github.com/CS-SI/SafeScale/lib/server/resources/enums/featuretargettype"
 	"github.com/CS-SI/SafeScale/lib/server/resources/enums/installmethod"
 	"github.com/CS-SI/SafeScale/lib/utils/data"
@@ -35,6 +36,7 @@ type Targetable interface {
 	InstalledFeatures() []string                                                   // returns a list of installed features
 	InstallMethods() map[uint8]installmethod.Enum                                  // returns a list of installation methods usable on the target, ordered from upper to lower preference (1 = the highest preference)
 	RegisterFeature(f Feature, requiredBy Feature, clusterContext bool) fail.Error // registers a feature on target in metadata
+	Service() iaas.Service                                                         // returns the iaas.Service used by the target
 	TargetType() featuretargettype.Enum                                            // returns the type of the target
 }
 

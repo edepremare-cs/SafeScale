@@ -20,9 +20,12 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/CS-SI/SafeScale/lib/server/resources/enums/clusterflavor"
 	"github.com/farmergreg/rfsnotify"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -67,10 +70,11 @@ type FeatureFile struct {
 	displayFileName           string                       // is the 'pretty' name of the specification file
 	embedded                  bool                         // tells if the Feature is embedded in SafeScale
 	specs                     *viper.Viper                 // is the Viper instance containing Feature file content
-	parameters                map[string]FeatureParameter  // contains all the parameters defined in Feature file
-	versionControl            map[string]string            // contains the templated bash code to determine version of a component used in the FeatureFile
 	observersLock             *sync.RWMutex                // lock to access field 'observers'
 	observers                 map[string]observer.Observer // contains the Observers of the FeatureFile
+	suitableFor               map[string]struct{}          // tells for what the Feature is suitable
+	parameters                map[string]FeatureParameter  // contains all the parameters defined in Feature file
+	versionControl            map[string]string            // contains the templated bash code to determine version of a component used in the FeatureFile
 	dependencies              map[string]struct{}          // contains the list of features required to install the Feature described by the file
 	clusterSizingRequirements map[string]interface{}       // contains the cluster sizing requirements to allow install
 	installers                map[string]interface{}
@@ -275,7 +279,7 @@ func LoadFeatureFile(svc iaas.Service, name string, embeddedOnly bool) (_ *Featu
 	)
 	ce, xerr := featureFileController.cache.Get(name, cacheOptions...)
 	if xerr != nil {
-		logrus.Error(callstack.DecorateWith("", xerr.Error(), "", 0))
+		//logrus.Error(callstack.DecorateWith("", xerr.Error(), "", 0))
 		switch xerr.(type) {
 		case *fail.ErrNotFound:
 			return nil, fail.NotFoundError("failed to find Feature '%s'", name)
@@ -387,7 +391,12 @@ func (ff *FeatureFile) Parse() fail.Error {
 		return fail.InvalidInstanceError()
 	}
 
-	xerr := ff.parseFeatureRequirements()
+	xerr := ff.parseSuitableFor()
+	if xerr != nil {
+		return xerr
+	}
+
+	xerr = ff.parseFeatureRequirements()
 	if xerr != nil {
 		return xerr
 	}
@@ -401,6 +410,80 @@ func (ff *FeatureFile) Parse() fail.Error {
 	if xerr != nil {
 		return xerr
 	}
+
+	return nil
+}
+
+// parseSuitableFor parses the field suitableFor
+func (ff *FeatureFile) parseSuitableFor() fail.Error {
+	const (
+		yamlRootKey = "feature.suitableFor"
+	)
+
+	var (
+		flavorBOH      clusterflavor.Enum = clusterflavor.BOH
+		flavorK8S      clusterflavor.Enum = clusterflavor.K8S
+		flavorBOHLabel                    = flavorBOH.String()
+		flavorK8SLabel                    = flavorK8S.String()
+	)
+
+	out := map[string]struct{}{}
+	if ff.specs.IsSet(yamlRootKey) {
+		fields := ff.specs.GetStringMap(yamlRootKey)
+		for k, v := range fields {
+			switch strings.ToLower(k) {
+			case "host":
+				if _, ok := v.(bool); ok {
+					if v.(bool) {
+						out["host"] = struct{}{}
+					}
+				} else if _, ok := v.(string); ok {
+					switch strings.ToLower(v.(string)) {
+					case "yes", "y", "ok", "1", "true":
+						out["host"] = struct{}{}
+					}
+				} else {
+					return fail.SyntaxError("unexpected value for key '%s.host'", yamlRootKey)
+				}
+
+			case "cluster":
+				if _, ok := v.(bool); ok {
+					if v.(bool) {
+						out[flavorBOHLabel] = struct{}{}
+						out[flavorK8SLabel] = struct{}{}
+					}
+				} else if _, ok := v.(string); ok {
+					splitted := strings.Split(v.(string), ",")
+					for _, v := range splitted {
+						if v == "all" {
+							out[flavorBOHLabel] = struct{}{}
+							out[flavorK8SLabel] = struct{}{}
+						} else {
+							flavor, err := clusterflavor.Parse(v)
+							if err != nil {
+								return fail.ConvertError(err)
+							}
+							out[flavor.String()] = struct{}{}
+						}
+					}
+				}
+
+			default:
+				return fail.SyntaxError("unhandled key '%s.%s'", yamlRootKey, v.(string))
+			}
+		}
+	}
+
+	// if there are no information in suitableFor, the feature is suitable for everything
+	if len(out) == 0 {
+		out = map[string]struct{}{
+			"host":         {},
+			flavorBOHLabel: {},
+			flavorK8SLabel: {},
+		}
+	}
+
+	ff.suitableFor = out
 
 	return nil
 }
@@ -554,10 +637,117 @@ func (ff FeatureFile) getClusterSizingRequirementsForFlavor(flavor string) map[s
 	return nil
 }
 
+// getInsideFeatureFileFolders returns a list of folders to watch into
+func getFeatureFileFolders(useCWD bool) []string {
+	length := len(featureFileFolders)
+	if useCWD {
+		length += len(cwdFeatureFileFolders)
+	}
+	out := make([]string, 0, length)
+
+	// get current dir
+	cwd, _ := os.Getwd()
+
+	// get homedir
+	home := os.Getenv("HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+
+	for k := range featureFileFolders {
+		if strings.HasPrefix(featureFileFolders[k], "$HOME") {
+			if home != "" {
+				featureFileFolders[k] = home + strings.TrimPrefix(featureFileFolders[k], "$HOME")
+			} else {
+				continue
+			}
+		} else if strings.HasPrefix(featureFileFolders[k], ".") {
+			if cwd != "" {
+				featureFileFolders[k] = cwd + strings.TrimPrefix(featureFileFolders[k], ".")
+			} else {
+				continue
+			}
+		}
+
+		out = append(out, featureFileFolders[k])
+	}
+
+	if useCWD {
+		for k := range cwdFeatureFileFolders {
+			if strings.HasPrefix(cwdFeatureFileFolders[k], "$HOME") {
+				if home != "" {
+					cwdFeatureFileFolders[k] = home + strings.TrimPrefix(cwdFeatureFileFolders[k], "$HOME")
+				} else {
+					continue
+				}
+			} else if strings.HasPrefix(cwdFeatureFileFolders[k], ".") {
+				if cwd != "" {
+					cwdFeatureFileFolders[k] = cwd + strings.TrimPrefix(cwdFeatureFileFolders[k], ".")
+				} else {
+					continue
+				}
+			}
+
+			out = append(out, cwdFeatureFileFolders[k])
+		}
+	}
+
+	return out
+}
+
+// walkInsideFeatureFileFolders walks inside folders where Feature Files may be found and returns a list of Feature names
+func walkInsideFeatureFileFolders(filter featureFilter) ([]string, fail.Error) {
+	out := []string{}
+
+	switch filter {
+	case allWithEmbedded, embeddedOnly:
+		for _, v := range allEmbeddedFeatures {
+			out = append(out, v.GetName())
+		}
+	}
+
+	switch filter {
+	case allWithEmbedded, withoutEmbedded:
+		for _, v := range getFeatureFileFolders(false) {
+			err := filepath.Walk(v, func(walkPath string, fi os.FileInfo, err error) error {
+				if err != nil {
+					switch casted := err.(type) {
+					case *fs.PathError:
+						switch casted.Err {
+						case unix.ENOENT:
+							// entry not found, ignore it
+							debug.IgnoreError(err)
+							return nil
+						default:
+						}
+					default:
+					}
+					logrus.Error(err)
+					return err
+				}
+
+				if !fi.IsDir() {
+					name := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSuffix(walkPath, path.Ext(walkPath)), v), "/")
+					if name != "" {
+						out = append(out, name)
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				return nil, fail.ConvertError(err)
+			}
+		}
+	}
+
+	return out, nil
+}
+
 // setViperConfgigPathes ...
 func setViperConfigPathes(v *viper.Viper) {
 	if v != nil {
-		for _, i := range featureFileFolders {
+		folders := getFeatureFileFolders(false)
+		for _, i := range folders {
 			v.AddConfigPath(i)
 		}
 	}
@@ -591,57 +781,12 @@ func watchFeatureFileFolders() error {
 		}
 	}()
 
-	// get current dir
-	cwd, _ := os.Getwd()
-
-	// get homedir
-	home := os.Getenv("HOME")
-	if home == "" {
-		home, _ = os.UserHomeDir()
-	}
-
-	for k := range featureFileFolders {
-		if strings.HasPrefix(featureFileFolders[k], "$HOME") {
-			if home != "" {
-				featureFileFolders[k] = home + strings.TrimPrefix(featureFileFolders[k], "$HOME")
-			} else {
-				continue
-			}
-		} else if strings.HasPrefix(featureFileFolders[k], ".") {
-			if cwd != "" {
-				featureFileFolders[k] = cwd + strings.TrimPrefix(featureFileFolders[k], ".")
-			} else {
-				continue
-			}
-		}
-
-		err = addPathToWatch(watcher, featureFileFolders[k])
+	for _, v := range getFeatureFileFolders(false) {
+		err = addPathToWatch(watcher, v)
 		if err != nil {
 			return err
 		}
 	}
-
-	// FIXME: disabled for now, need to add a flag or configuration option to make this part optional
-	// for k := range cwdFeatureFileFolders {
-	// 	if strings.HasPrefix(cwdFeatureFileFolders[k], "$HOME") {
-	// 		if home != "" {
-	// 			cwdFeatureFileFolders[k] = home + strings.TrimPrefix(cwdFeatureFileFolders[k], "$HOME")
-	// 		} else {
-	// 			continue
-	// 		}
-	// 	} else if strings.HasPrefix(cwdFeatureFileFolders[k], ".") {
-	// 		if cwd != "" {
-	// 			cwdFeatureFileFolders[k] = cwd + strings.TrimPrefix(cwdFeatureFileFolders[k], ".")
-	// 		} else {
-	// 			continue
-	// 		}
-	// 	}
-	//
-	// 	err = addPathToWatch(watcher, cwdFeatureFileFolders[k])
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
 
 	<-done
 	return nil
@@ -656,6 +801,7 @@ func addPathToWatch(w *rfsnotify.RWatcher, path string) error {
 			case unix.ENOENT:
 				// folder not found, ignore it
 				debug.IgnoreError(err)
+				return nil
 			default:
 				logrus.Error(err)
 				return err
@@ -699,15 +845,8 @@ func onFeatureFileEvent(w *rfsnotify.RWatcher, e fsnotify.Event) {
 		}
 
 		// From here, we need to invalidate cache entry, either because content has changed or file have been removed/renamed or updated
-		featureName := relativeName
-		if strings.HasSuffix(relativeName, ".yaml") {
-			featureName = strings.TrimSuffix(relativeName, ".yaml")
-		}
-		if strings.HasSuffix(relativeName, ".yml") {
-			featureName = strings.TrimSuffix(relativeName, ".yml")
-		}
+		featureName := strings.TrimPrefix(strings.TrimSuffix(relativeName, path.Ext(relativeName)), "/")
 		if len(featureName) != len(relativeName) {
-			featureName = strings.TrimPrefix(featureName, "/")
 			_, xerr := featureFileController.cache.Get(featureName)
 			if xerr == nil {
 				xerr = featureFileController.cache.FreeEntry(featureName)
@@ -736,16 +875,9 @@ func onFeatureFileEvent(w *rfsnotify.RWatcher, e fsnotify.Event) {
 
 // reduceFilename removes the absolute part of 'name' corresponding to folder
 func reduceFilename(name string) string {
+	folders := getFeatureFileFolders(false)
 	last := name
-	for _, v := range featureFileFolders {
-		if strings.HasPrefix(name, v) {
-			reduced := strings.TrimPrefix(name, v)
-			if len(reduced) < len(last) {
-				last = reduced
-			}
-		}
-	}
-	for _, v := range cwdFeatureFileFolders {
+	for _, v := range folders {
 		if strings.HasPrefix(name, v) {
 			reduced := strings.TrimPrefix(name, v)
 			if len(reduced) < len(last) {
