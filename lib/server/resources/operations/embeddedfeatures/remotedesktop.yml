@@ -19,7 +19,7 @@ feature:
             - docker
 
     suitableFor:
-        host: no
+        host: yes
         cluster: all
 
     parameters:
@@ -385,9 +385,13 @@ feature:
                             cat >${SF_ETCDIR}/remotedesktop/build/user-mapping.xml <<'EOF'
                             <user-mapping>
                                 <authorize
+                            {{ if not .ClusterFlavor }}
+                                    username="{{ .Username }}"
+                                    password="{{ .Password }}">
+                            {{ else }}
                                     username="{{ .ClusterAdminUsername }}"
                                     password="{{ .ClusterAdminPassword }}">
-
+                            {{ end }}
                                     <!-- First authorized connection -->
                                     <connection name="{{ .Hostname }}">
                                         <protocol>vnc</protocol>
@@ -515,7 +519,6 @@ feature:
                             masters: all
                         run: |
                             # Guacd need sshd to authorize password authentication...
-                            # DOCKER0_SUBNET=$(docker network inspect bridge {{ "--format '{{json .}}'" }} | jq -r .IPAM.Config[0].Subnet)
                             cat >>/etc/ssh/sshd_config <<-EOF
                             # Allow Password Authentication from user {{.Username}} for guacd to work
                             Match User {{.Username}} Address $(sfSubnetOfDockerBridge)
